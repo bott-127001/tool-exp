@@ -112,25 +112,25 @@ async def login(user: str = Query(...)):
     
     auth_url = f"{UPSTOX_AUTH_URL}?{urlencode(params)}"
     
-    # Debug logging - CRITICAL for troubleshooting
-    import traceback
-    print(f"\n{'='*70}")
-    print(f"🔐 OAuth Login Request for user: {user}")
-    print(f"{'='*70}")
-    print(f"⚠️  WARNING: This endpoint was called!")
-    print(f"   This should ONLY happen when user clicks login button")
-    print(f"   If you see this on backend startup, something is wrong!")
-    print(f"\nStack trace (who called this):")
-    for line in traceback.format_stack()[-5:-1]:
-        print(f"   {line.strip()}")
-    print(f"\nClient ID: {credentials['client_id']}")
-    print(f"Redirect URI: {redirect_uri}")
-    print(f"State: {user}")
-    print(f"\n⚠️  IMPORTANT: The Redirect URI above MUST match EXACTLY in Upstox app settings!")
-    print(f"   Check: https://account.upstox.com/developer/apps")
-    print(f"\nGenerated Auth URL:")
-    print(f"{auth_url}")
-    print(f"{'='*70}\n")
+    # # Debug logging - CRITICAL for troubleshooting
+    # import traceback
+    # print(f"\n{'='*70}")
+    # print(f"🔐 OAuth Login Request for user: {user}")
+    # print(f"{'='*70}")
+    # print(f"⚠️  WARNING: This endpoint was called!")
+    # print(f"   This should ONLY happen when user clicks login button")
+    # print(f"   If you see this on backend startup, something is wrong!")
+    # print(f"\nStack trace (who called this):")
+    # for line in traceback.format_stack()[-5:-1]:
+    #     print(f"   {line.strip()}")
+    # print(f"\nClient ID: {credentials['client_id']}")
+    # print(f"Redirect URI: {redirect_uri}")
+    # print(f"State: {user}")
+    # print(f"\n⚠️  IMPORTANT: The Redirect URI above MUST match EXACTLY in Upstox app settings!")
+    # print(f"   Check: https://account.upstox.com/developer/apps")
+    # print(f"\nGenerated Auth URL:")
+    # print(f"{auth_url}")
+    # print(f"{'='*70}\n")
     
     return RedirectResponse(url=auth_url)
 
@@ -144,16 +144,16 @@ async def callback(
     state: Optional[str] = Query(None)
 ):
     """Handle OAuth callback"""
-    # Debug logging
-    print(f"\n{'='*60}")
-    print(f"OAuth Callback Received")
-    print(f"Query params: {dict(request.query_params)}")
-    print(f"Code: {code}")
-    print(f"State: {state}")
-    print(f"Error: {error}")
-    print(f"Error Description: {error_description}")
-    print(f"Full URL: {request.url}")
-    print(f"{'='*60}\n")
+    # # Debug logging
+    # print(f"\n{'='*60}")
+    # print(f"OAuth Callback Received")
+    # print(f"Query params: {dict(request.query_params)}")
+    # print(f"Code: {code}")
+    # print(f"State: {state}")
+    # print(f"Error: {error}")
+    # print(f"Error Description: {error_description}")
+    # print(f"Full URL: {request.url}")
+    # print(f"{'='*60}\n")
     
     # Handle OAuth errors
     if error:

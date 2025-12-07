@@ -76,7 +76,7 @@ async def fetch_option_chain(username: str) -> Optional[Dict]:
         "expiry_date": expiry_date
     }
     
-    print(f"📊 Fetching option chain - Instrument: {instrument_key}, Expiry: {expiry_date}")
+    # print(f"📊 Fetching option chain - Instrument: {instrument_key}, Expiry: {expiry_date}")
     
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -133,7 +133,7 @@ async def fetch_option_chain(username: str) -> Optional[Dict]:
 def normalize_option_chain(upstox_data: Dict) -> Dict:
     """Normalize Upstox API response to our data model"""
     try:
-        print(f"�� Normalizing option chain data...")
+        # print(f"🛰️ Normalizing option chain data...")
         
         if upstox_data.get("status") != "success":
             print(f"Invalid response status: {upstox_data.get('status')}")

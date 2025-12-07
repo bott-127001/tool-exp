@@ -226,7 +226,7 @@ async def get_option_chain():
 @app.get("/health-check")
 async def health_check():
     """Endpoint for uptime monitoring to prevent the service from spinning down."""
-    print("Health check ping received.")  # Good for debugging
+    # print("Health check ping received.")  # Good for debugging
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 
