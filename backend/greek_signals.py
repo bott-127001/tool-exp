@@ -74,14 +74,14 @@ def check_position_pattern(aggregated_greeks: Dict, position: str, settings: Dic
     }
 
 
-def detect_signals(normalized_data: Dict, username: str) -> List[Dict]:
+async def detect_signals(normalized_data: Dict, username: str) -> List[Dict]:
     """
     Detect signals based on Greek signatures
     
     Returns list of signal detection results for all positions
     """
     # Get user settings
-    settings = get_user_settings(username)
+    settings = await get_user_settings(username)
     if not settings:
         # Use defaults
         settings = {
@@ -124,8 +124,7 @@ def detect_signals(normalized_data: Dict, username: str) -> List[Dict]:
                     if opt["type"] == option_type and opt["strike"] == strike_price:
                         strike_ltp = opt.get("ltp", 0)
                         break
-                
-                log_signal(
+                await log_signal(
                     username=username,
                     position=position,
                     strike_price=strike_price,
@@ -150,4 +149,3 @@ def detect_signals(normalized_data: Dict, username: str) -> List[Dict]:
 def get_aggregated_greeks(normalized_data: Dict) -> Dict:
     """Get aggregated Greeks (wrapper function)"""
     return aggregate_call_put_greeks(normalized_data)
-

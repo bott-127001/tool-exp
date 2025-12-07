@@ -5,7 +5,7 @@ import os
 from typing import Optional
 from urllib.parse import urlencode
 from dotenv import load_dotenv
-from database import store_tokens, get_user_tokens
+from database import store_tokens, get_user_tokens, clear_user_tokens
 
 # Load environment variables from .env file
 load_dotenv()
@@ -136,7 +136,7 @@ async def login(user: str = Query(...)):
 
 
 @auth_router.get("/callback")
-async def callback(
+async def callback( # This function is already async, which is great
     request: Request,
     code: Optional[str] = Query(None),
     error: Optional[str] = Query(None),
@@ -266,7 +266,7 @@ async def callback(
             expires_at = int(time.time()) + expires_in
             
             # Store tokens in database
-            store_tokens(state, access_token, refresh_token, expires_at)
+            await store_tokens(state, access_token, refresh_token, expires_at)
             
             # Enable polling after successful login
             from data_fetcher import enable_polling
@@ -297,11 +297,11 @@ async def callback(
 @auth_router.get("/check/{user}")
 async def check_auth(user: str):
     """Check if user is authenticated"""
-    tokens = get_user_tokens(user)
+    tokens = await get_user_tokens(user)
     if tokens:
         # Check if token is expired
         import time
-        if tokens["token_expires_at"] > time.time():
+        if tokens.get("token_expires_at") and tokens["token_expires_at"] > time.time():
             return {"authenticated": True}
     
     return {"authenticated": False}
@@ -310,22 +310,58 @@ async def check_auth(user: str):
 @auth_router.post("/logout/{user}")
 async def logout(user: str):
     """Logout a user by clearing their tokens and stopping polling"""
-    from database import get_db_connection
-    import sqlite3
     from data_fetcher import disable_polling
     
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE users 
-        SET access_token = NULL, refresh_token = NULL, token_expires_at = NULL
-        WHERE username = ?
-    """, (user,))
-    conn.commit()
-    conn.close()
+    await clear_user_tokens(user)
     
     # Disable polling on logout
     disable_polling()
     
     print(f"✓ Logged out {user} - tokens cleared and polling stopped")
     return {"message": f"Logged out {user} successfully"}
+
+
+async def refresh_access_token(username: str) -> Optional[str]:
+    """
+    Refresh the access token using the stored refresh token.
+    Returns the new access token if successful, otherwise None.
+    """
+    print(f"🔄 Attempting to refresh token for user: {username}")
+    
+    user_tokens = await get_user_tokens(username)
+    if not user_tokens or not user_tokens.get("refresh_token"):
+        print(f"❌ No refresh token found for {username}. Cannot refresh.")
+        return None
+
+    credentials = USER_CREDENTIALS.get(username)
+    if not credentials:
+        print(f"❌ No credentials found for {username}.")
+        return None
+
+    payload = {
+        "client_id": credentials["client_id"],
+        "client_secret": credentials["client_secret"],
+        "refresh_token": user_tokens["refresh_token"],
+        "grant_type": "refresh_token"
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            UPSTOX_TOKEN_URL,
+            data=payload,
+            headers={"Accept": "application/json"}
+        )
+
+    if response.status_code != 200:
+        print(f"❌ Token refresh failed for {username}: {response.status_code} - {response.text}")
+        # Potentially clear tokens here if refresh token is invalid
+        return None
+
+    new_token_data = response.json()
+    new_access_token = new_token_data["access_token"]
+    new_expires_at = int(time.time()) + new_token_data["expires_in"]
+    
+    # Store the new tokens. Note: Upstox might not return a new refresh token.
+    await store_tokens(username, new_access_token, user_tokens["refresh_token"], new_expires_at)
+    print(f"✅ Token refreshed successfully for {username}")
+    return new_access_token

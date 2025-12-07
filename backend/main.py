@@ -65,7 +65,7 @@ manager = ConnectionManager()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    init_db()
+    await init_db()
     print("Database initialized")
     print("Backend server ready. Polling will start automatically when a user authenticates.")
     
@@ -180,7 +180,7 @@ async def get_dashboard_data():
 @app.get("/api/settings/{user}")
 async def get_settings(user: str):
     """Get user settings"""
-    settings = get_user_settings(user)
+    settings = await get_user_settings(user)
     if not settings:
         raise HTTPException(status_code=404, detail="Settings not found")
     return settings
@@ -189,7 +189,7 @@ async def get_settings(user: str):
 @app.put("/api/settings/{user}")
 async def update_settings(user: str, settings: dict):
     """Update user settings"""
-    updated = update_user_settings(user, settings)
+    updated = await update_user_settings(user, settings)
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "Settings updated", "settings": updated}
@@ -199,7 +199,7 @@ async def update_settings(user: str, settings: dict):
 async def get_trade_logs(user: str):
     """Get trade logs for a user"""
     from database import get_trade_logs
-    logs = get_trade_logs(user)
+    logs = await get_trade_logs(user)
     return {"logs": logs}
 
 
@@ -223,7 +223,7 @@ async def get_option_chain():
         return normalized or {} # Return normalized data or an empty dict on failure
 
 
-@app.get("/health-check")
+@app.api_route("/health-check", methods=["GET", "HEAD"])
 async def health_check():
     """Endpoint for uptime monitoring to prevent the service from spinning down."""
     # print("Health check ping received.")  # Good for debugging
@@ -233,25 +233,28 @@ async def health_check():
 @app.get("/api/export-data")
 async def export_data():
     """Exports the collected market data log as a CSV file."""
-    from database import get_db_connection
+    from database import market_data_log_collection
     import csv
 
     output = io.StringIO()
     writer = csv.writer(output)
 
-    conn = get_db_connection()
-    if not conn:
-        raise HTTPException(status_code=500, detail="Database connection failed")
+    # Write headers
+    headers = ["timestamp", "underlying_price", "atm_strike", "aggregated_greeks", "signals"]
+    writer.writerow(headers)
 
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT timestamp, underlying_price, atm_strike, aggregated_greeks, signals FROM market_data_log ORDER BY timestamp")
-        writer.writerow([description[0] for description in cursor.description])  # Write headers
-        for row in cursor:
-            writer.writerow(row)
-    finally:
-        conn.close()
+    # Fetch data from MongoDB
+    cursor = market_data_log_collection.find({}, {"_id": 0}).sort("timestamp", 1)
+    async for doc in cursor:
+        writer.writerow([
+            doc.get("timestamp"),
+            doc.get("underlying_price"),
+            doc.get("atm_strike"),
+            json.dumps(doc.get("aggregated_greeks")),
+            json.dumps(doc.get("signals"))
+        ])
 
+    # Seek to the beginning of the stream
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=market_data_log.csv"})
 

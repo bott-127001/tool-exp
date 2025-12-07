@@ -1,249 +1,154 @@
-import sqlite3
 import json
 from datetime import datetime
 from typing import Optional, Dict, List
+import os
+try:
+    import motor.motor_asyncio
+    from pymongo import MongoClient
+    from pymongo.server_api import ServerApi
+    from pymongo.errors import ConnectionFailure
+except ImportError:
+    print("motor/pymongo not found. Please install with 'pip install motor pymongo'.")
+    exit(1)
 
-DB_PATH = "options_signals.db"
+MONGO_URI = os.getenv("MONGO_URI")
+client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
+db = client.get_database("option_tool_db")
 
+users_collection = db.get_collection("users")
+settings_collection = db.get_collection("user_settings")
+trade_logs_collection = db.get_collection("trade_logs")
+market_data_log_collection = db.get_collection("market_data_log")
 
-def get_db_connection():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+async def init_db():
+    """Initialize database indexes and default settings."""
+    try:
+        # Test connection
+        await client.admin.command('ping')
+        print("✅ Pinged your deployment. You successfully connected to MongoDB!")
+    except ConnectionFailure as e:
+        print(f"❌ MongoDB connection failed: {e}")
+        return
 
+    # Create indexes for faster queries
+    await users_collection.create_index("username", unique=True)
+    await settings_collection.create_index("username", unique=True)
+    await trade_logs_collection.create_index([("username", 1), ("timestamp", -1)])
+    await market_data_log_collection.create_index("timestamp")
 
-def init_db():
-    """Initialize database tables"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Users table for OAuth tokens
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            access_token TEXT,
-            refresh_token TEXT,
-            token_expires_at INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # User settings table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_settings (
-            username TEXT PRIMARY KEY,
-            delta_threshold REAL DEFAULT 0.20,
-            vega_threshold REAL DEFAULT 0.10,
-            theta_threshold REAL DEFAULT 0.02,
-            gamma_threshold REAL DEFAULT 0.01,
-            consecutive_confirmations INTEGER DEFAULT 2,
-            FOREIGN KEY (username) REFERENCES users(username)
-        )
-    """)
-    
-    # Trade logs table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS trade_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            username TEXT,
-            detected_position TEXT,
-            strike_price REAL,
-            strike_ltp REAL,
-            delta REAL,
-            vega REAL,
-            theta REAL,
-            gamma REAL,
-            raw_option_chain TEXT,
-            FOREIGN KEY (username) REFERENCES users(username)
-        )
-    """)
-    
     # Initialize default settings for known users
     for user in ["samarth", "prajwal"]:
-        cursor.execute("""
-            INSERT OR IGNORE INTO user_settings (username)
-            VALUES (?)
-        """, (user,))
-    
-    conn.commit()
-
-    # Market data log table for ML training data
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS market_data_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            underlying_price REAL NOT NULL,
-            atm_strike REAL NOT NULL,
-            aggregated_greeks TEXT,
-            signals TEXT
+        default_settings = {
+            "delta_threshold": 0.20,
+            "vega_threshold": 0.10,
+            "theta_threshold": 0.02,
+            "gamma_threshold": 0.01,
+            "consecutive_confirmations": 2
+        }
+        await settings_collection.update_one(
+            {"username": user},
+            {"$setOnInsert": {"username": user, **default_settings}},
+            upsert=True
         )
-    """)
-    
-    conn.commit()
-    conn.close()
 
+async def store_tokens(username: str, access_token: str, refresh_token: str, expires_at: int):
+    """Store or update OAuth tokens for a user."""
+    await users_collection.update_one(
+        {"username": username},
+        {
+            "$set": {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "token_expires_at": expires_at,
+                "updated_at": datetime.utcnow()
+            },
+            "$setOnInsert": {"username": username, "created_at": datetime.utcnow()}
+        },
+        upsert=True
+    )
 
-def store_tokens(username: str, access_token: str, refresh_token: str, expires_at: int):
-    """Store OAuth tokens for a user"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT OR REPLACE INTO users (username, access_token, refresh_token, token_expires_at)
-        VALUES (?, ?, ?, ?)
-    """, (username, access_token, refresh_token, expires_at))
-    conn.commit()
-    conn.close()
+async def get_user_tokens(username: str) -> Optional[Dict]:
+    """Get stored tokens for a user."""
+    user_doc = await users_collection.find_one({"username": username})
+    return user_doc
 
+async def get_user_settings(username: str) -> Optional[Dict]:
+    """Get user settings."""
+    settings_doc = await settings_collection.find_one({"username": username})
+    return settings_doc
 
-def get_user_tokens(username: str) -> Optional[Dict]:
-    """Get stored tokens for a user"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT access_token, refresh_token, token_expires_at
-        FROM users
-        WHERE username = ?
-    """, (username,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    if row:
-        return {
-            "access_token": row["access_token"],
-            "refresh_token": row["refresh_token"],
-            "token_expires_at": row["token_expires_at"]
-        }
-    return None
+async def update_user_settings(username: str, settings: Dict) -> Optional[Dict]:
+    """Update user settings."""
+    update_data = {
+        "delta_threshold": settings.get("delta_threshold"),
+        "vega_threshold": settings.get("vega_threshold"),
+        "theta_threshold": settings.get("theta_threshold"),
+        "gamma_threshold": settings.get("gamma_threshold"),
+        "consecutive_confirmations": settings.get("consecutive_confirmations"),
+    }
+    # Filter out None values
+    update_data = {k: v for k, v in update_data.items() if v is not None}
 
+    result = await settings_collection.find_one_and_update(
+        {"username": username},
+        {"$set": update_data},
+        return_document=True
+    )
+    return result
 
-def get_user_settings(username: str) -> Optional[Dict]:
-    """Get user settings"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT delta_threshold, vega_threshold, theta_threshold,
-               gamma_threshold, consecutive_confirmations
-        FROM user_settings
-        WHERE username = ?
-    """, (username,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    if row:
-        return {
-            "delta_threshold": row["delta_threshold"],
-            "vega_threshold": row["vega_threshold"],
-            "theta_threshold": row["theta_threshold"],
-            "gamma_threshold": row["gamma_threshold"],
-            "consecutive_confirmations": row["consecutive_confirmations"]
-        }
-    return None
-
-
-def update_user_settings(username: str, settings: Dict) -> Optional[Dict]:
-    """Update user settings"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE user_settings
-        SET delta_threshold = ?,
-            vega_threshold = ?,
-            theta_threshold = ?,
-            gamma_threshold = ?,
-            consecutive_confirmations = ?
-        WHERE username = ?
-    """, (
-        settings.get("delta_threshold", 0.20),
-        settings.get("vega_threshold", 0.10),
-        settings.get("theta_threshold", 0.02),
-        settings.get("gamma_threshold", 0.01),
-        settings.get("consecutive_confirmations", 2),
-        username
-    ))
-    conn.commit()
-    conn.close()
-    
-    if cursor.rowcount > 0:
-        return get_user_settings(username)
-    return None
-
-
-def log_market_data(data: dict):
+async def log_market_data(data: dict):
     """Logs a snapshot of market data to the database for ML training."""
     if not data or 'timestamp' not in data:
         return
 
-    conn = get_db_connection()
-    if not conn:
-        print("❌ Could not get DB connection to log market data.")
-        return
+    log_entry = {
+        "timestamp": datetime.fromisoformat(data.get('timestamp')),
+        "underlying_price": data.get('underlying_price'),
+        "atm_strike": data.get('atm_strike'),
+        "aggregated_greeks": data.get('aggregated_greeks', {}),
+        "signals": data.get('signals', [])
+    }
+    await market_data_log_collection.insert_one(log_entry)
 
-    try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO market_data_log (timestamp, underlying_price, atm_strike, aggregated_greeks, signals)
-            VALUES (?, ?, ?, ?, ?)
-        """, (
-            data.get('timestamp'),
-            data.get('underlying_price'),
-            data.get('atm_strike'),
-            json.dumps(data.get('aggregated_greeks', {})),
-            json.dumps(data.get('signals', []))
-        ))
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def log_signal(username: str, position: str, strike_price: float, strike_ltp: float,
+async def log_signal(username: str, position: str, strike_price: float, strike_ltp: float,
                delta: float, vega: float, theta: float, gamma: float, raw_chain: dict):
-    """Log a detected signal"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO trade_logs (
-            username, detected_position, strike_price, strike_ltp,
-            delta, vega, theta, gamma, raw_option_chain
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        username, position, strike_price, strike_ltp,
-        delta, vega, theta, gamma, json.dumps(raw_chain)
-    ))
-    conn.commit()
-    conn.close()
+    """Log a detected signal."""
+    log_entry = {
+        "timestamp": datetime.utcnow(),
+        "username": username,
+        "detected_position": position,
+        "strike_price": strike_price,
+        "strike_ltp": strike_ltp,
+        "delta": delta,
+        "vega": vega,
+        "theta": theta,
+        "gamma": gamma,
+        "raw_option_chain": json.dumps(raw_chain) # Storing as JSON string
+    }
+    await trade_logs_collection.insert_one(log_entry)
 
-
-def get_trade_logs(username: str, limit: int = 100) -> List[Dict]:
-    """Get trade logs for a user"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT timestamp, detected_position, strike_price, strike_ltp,
-               delta, vega, theta, gamma, raw_option_chain
-        FROM trade_logs
-        WHERE username = ?
-        ORDER BY timestamp DESC
-        LIMIT ?
-    """, (username, limit))
+async def get_trade_logs(username: str, limit: int = 100) -> List[Dict]:
+    """Get trade logs for a user."""
+    cursor = trade_logs_collection.find({"username": username}).sort("timestamp", -1).limit(limit)
+    logs = await cursor.to_list(length=limit)
     
-    rows = cursor.fetchall()
-    conn.close()
-    
-    logs = []
-    for row in rows:
-        logs.append({
-            "timestamp": row["timestamp"],
-            "detected_position": row["detected_position"],
-            "strike_price": row["strike_price"],
-            "strike_ltp": row["strike_ltp"],
-            "delta": row["delta"],
-            "vega": row["vega"],
-            "theta": row["theta"],
-            "gamma": row["gamma"],
-            "raw_option_chain": json.loads(row["raw_option_chain"]) if row["raw_option_chain"] else None
-        })
-    
+    # Process logs to handle BSON/JSON conversion
+    for log in logs:
+        log["_id"] = str(log["_id"]) # Convert ObjectId to string
+        if "raw_option_chain" in log and isinstance(log["raw_option_chain"], str):
+            try:
+                log["raw_option_chain"] = json.loads(log["raw_option_chain"])
+            except json.JSONDecodeError:
+                log["raw_option_chain"] = {"error": "Failed to decode JSON"}
     return logs
+
+async def clear_user_tokens(username: str):
+    """Clear tokens for a user on logout."""
+    await users_collection.update_one(
+        {"username": username},
+        {"$set": {
+            "access_token": None,
+            "refresh_token": None,
+            "token_expires_at": None
+        }}
+    )

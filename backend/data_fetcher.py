@@ -4,6 +4,7 @@ from typing import Optional, Dict, List
 from datetime import datetime, timedelta
 from database import get_user_tokens
 from calc import find_atm_strike, get_atm_plus_otm_options
+from auth import refresh_access_token
 from greek_signals import detect_signals, get_aggregated_greeks
 import json
 
@@ -45,20 +46,25 @@ UPSTOX_OPTION_CHAIN_URL = f"{UPSTOX_BASE_URL}/option/chain"
 
 async def fetch_option_chain(username: str) -> Optional[Dict]:
     """Fetch option chain data from Upstox API"""
-    tokens = get_user_tokens(username)
+    tokens = await get_user_tokens(username)
     if not tokens:
         print(f"No tokens found for user: {username}")
         return None
     
     # Check token expiration
     import time
-    if tokens["token_expires_at"] <= time.time():
+    access_token = tokens.get("access_token")
+    
+    if not access_token or tokens.get("token_expires_at", 0) <= time.time():
         print(f"Token expired for user: {username}")
-        # TODO: Implement token refresh
-        return None
+        new_access_token = await refresh_access_token(username)
+        if not new_access_token:
+            print(f"❌ Failed to refresh token for {username}. User needs to log in again.")
+            return None
+        access_token = new_access_token
     
     headers = {
-        "Authorization": f"Bearer {tokens['access_token']}",
+        "Authorization": f"Bearer {access_token}",
         "Accept": "application/json"
     }
     
@@ -233,13 +239,13 @@ async def polling_worker(manager):
         # Only poll if should_poll is True AND we have an authenticated user
         if not should_poll:
             # Polling disabled - wait and check again
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
             continue
         
         # Find authenticated user (first available)
         found_user = None
         for user in ["samarth", "prajwal"]:
-            tokens = get_user_tokens(user)
+            tokens = await get_user_tokens(user)
             if tokens:
                 import time
                 # Check if token exists and is not null
@@ -253,7 +259,7 @@ async def polling_worker(manager):
                 print(f"⚠️  No authenticated user available. Stopping polling...")
                 current_user = None
                 # Disable polling when user logs out
-                should_poll = False
+                # should_poll = False # Let logout handle this
             await asyncio.sleep(2)
             continue
         
@@ -290,7 +296,7 @@ async def polling_worker(manager):
                     aggregated = get_aggregated_greeks(normalized_data)
                     
                     # Detect signals
-                    signals = detect_signals(normalized_data, current_user)
+                    signals = await detect_signals(normalized_data, current_user)
                     
                     # Combine all data
                     latest_data = {
@@ -310,7 +316,7 @@ async def polling_worker(manager):
                         # Import here to avoid circular dependency
                         from database import log_market_data
                         # Log the data to the database for ML training
-                        log_market_data(latest_data)
+                        await log_market_data(latest_data)
                     else:
                         print(f"⚠️  No WebSocket manager available")
                 except Exception as e:
