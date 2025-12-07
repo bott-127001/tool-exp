@@ -347,7 +347,7 @@ async def start_polling(manager):
 
 async def stop_polling():
     """Stop the polling worker"""
-    global polling_active, should_poll
+    global polling_active, should_poll, latest_data
     polling_active = False
     should_poll = False
     print("🛑 Polling stopped")
@@ -356,14 +356,17 @@ async def stop_polling():
 def enable_polling():
     """Enable polling - called after successful login"""
     global should_poll
+    # Reset latest_data to ensure no stale data is shown on new login
+    # latest_data = None 
     should_poll = True
     print("✅ Polling enabled - will start fetching data")
 
 
 def disable_polling():
     """Disable polling - called on logout"""
-    global should_poll
+    global should_poll, latest_data
     should_poll = False
+    latest_data = None  # Clear the data when polling is disabled
     print("🛑 Polling disabled - will stop fetching data")
 
 
