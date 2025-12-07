@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OAuth Debug Page</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .info { background: #e3f2fd; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffebee; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #e8f5e9; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        code { background: #f5f5f5; padding: 2px 5px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>OAuth Callback Debug Page</h1>
+    <div id="debug-info"></div>
+    
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        
+        const code = urlParams.get('code');
+        const state = urlParams.get('state');
+        const error = urlParams.get('error') || hashParams.get('error');
+        const errorDescription = urlParams.get('error_description') || hashParams.get('error_description');
+        
+        let html = '';
+        
+        if (error) {
+            html += `<div class="error">
+                <h3>❌ OAuth Error</h3>
+                <p><strong>Error:</strong> <code>${error}</code></p>
+                ${errorDescription ? `<p><strong>Description:</strong> ${errorDescription}</p>` : ''}
+                <p><strong>Possible causes:</strong></p>
+                <ul>
+                    <li>Redirect URI mismatch between .env and Upstox app settings</li>
+                    <li>Invalid client_id or client_secret</li>
+                    <li>App not properly configured in Upstox</li>
+                </ul>
+            </div>`;
+        } else if (code && state) {
+            html += `<div class="success">
+                <h3>✅ Callback Received!</h3>
+                <p><strong>Authorization Code:</strong> <code>${code.substring(0, 20)}...</code></p>
+                <p><strong>State:</strong> <code>${state}</code></p>
+                <p>If you see this page, the callback URL is working correctly!</p>
+                <p>The backend should process this and redirect you to the dashboard.</p>
+            </div>`;
+        } else {
+            html += `<div class="info">
+                <h3>ℹ️ No OAuth Parameters</h3>
+                <p>This page was accessed without OAuth callback parameters.</p>
+                <p><strong>URL:</strong> <code>${window.location.href}</code></p>
+                <p><strong>Expected:</strong> A redirect from Upstox with <code>?code=...&state=...</code></p>
+            </div>`;
+        }
+        
+        html += `<div class="info">
+            <h3>Debug Information</h3>
+            <p><strong>Current URL:</strong> <code>${window.location.href}</code></p>
+            <p><strong>All URL Parameters:</strong></p>
+            <ul>`;
+        
+        for (const [key, value] of urlParams.entries()) {
+            html += `<li><code>${key}</code>: <code>${value}</code></li>`;
+        }
+        
+        html += `</ul>
+            <p><strong>Expected Redirect URI in Upstox:</strong> <code>http://localhost:8000/auth/callback</code></p>
+            <p><a href="http://localhost:3000/login">← Go back to login</a></p>
+        </div>`;
+        
+        document.getElementById('debug-info').innerHTML = html;
+    </script>
+</body>
+</html>
+
