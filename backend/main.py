@@ -267,14 +267,15 @@ async def root():
         "status": "running",
     }
 
-# Mount the static files directory to serve the React app
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+# Mount the 'assets' directory from within 'static' to serve JS, CSS, etc.
+# This path must match the base path in your frontend build config (Vite)
+app.mount("/assets", StaticFiles(directory="static/assets"), name="assets")
 
 # The catch-all route to handle client-side routing (e.g., /dashboard, /settings)
 # This must be the LAST route defined.
 @app.get("/{full_path:path}")
 async def serve_react_app(full_path: str):
-    """Serve the React app for any path not caught by an API endpoint."""
+    """Serve the React index.html for any path not caught by an API endpoint."""
     from fastapi.responses import FileResponse
     return FileResponse('static/index.html')
 
