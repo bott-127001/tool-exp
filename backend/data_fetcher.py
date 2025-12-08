@@ -364,7 +364,8 @@ async def polling_worker(manager):
                         "baseline_greeks": baseline_greeks,
                         "change_from_baseline": change_from_baseline,
                         "signals": signals,
-                        "option_count": len(normalized_data.get("options", []))
+                        "option_count": len(normalized_data.get("options", [])),
+                        "options": normalized_data.get("options", []) # Add full options list for OptionChain page
                     }
                     
                     # Broadcast to WebSocket clients

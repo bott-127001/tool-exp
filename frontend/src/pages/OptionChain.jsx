@@ -1,72 +1,34 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import axios from 'axios'
+import { useData } from '../context/DataContext'
 
 function OptionChain() {
-  const [chainData, setChainData] = useState(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const fetchData = async () => {
-      try {
-        const response = await axios.get('/api/raw-option-chain')
-        if (isMounted && response.data && response.data.data) {
-          setChainData(response.data)
-          setLoading(false)
-        } else if (isMounted) {
-          // If there's no data, stop loading and show the "waiting" message
-          setLoading(false)
-        }
-      } catch (error) {
-        console.error('Error fetching option chain data:', error)
-        if (isMounted) {
-          setLoading(false)
-        }
-      }
-    }
-
-    // Fetch data immediately on mount
-    fetchData()
-
-    // Set up polling to refresh data every 5 seconds
-    const intervalId = setInterval(fetchData, 5000)
-
-    // Cleanup function to clear interval and prevent state updates on unmount
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId)
-    }
-  }, []) // Empty dependency array ensures this runs only once on mount
+  const { data } = useData();
 
   const renderTable = () => {
-    if (loading) {
-      return <p>Loading option chain data...</p>
-    }
-
-    if (!chainData || !chainData.data || chainData.data.length === 0) {
+    if (!data || !data.options || data.options.length === 0) {
       return <p>No option chain data available. Waiting for market data...</p>
     }
 
-    const options = chainData.data
-    const underlyingPrice = options[0]?.underlying_spot_price
+    const { options, underlying_price: underlyingPrice, expiry_date } = data;
 
     // Find ATM strike
     let atmStrike = 0
     let minDiff = Infinity
-    options.forEach(opt => {
-      const diff = Math.abs(opt.strike_price - underlyingPrice)
+    // Get unique strikes first
+    const strikes = [...new Set(options.map(opt => opt.strike))];
+    strikes.forEach(strike => {
+      const diff = Math.abs(strike - underlyingPrice)
       if (diff < minDiff) {
         minDiff = diff
-        atmStrike = opt.strike_price
+        atmStrike = strike
       }
     })
 
     return (
       <>
         <p><strong>Underlying Price:</strong> {underlyingPrice?.toFixed(2)} | <strong>ATM Strike:</strong> {atmStrike}</p>
-        <p><strong>Expiry Date:</strong> {chainData._expiry_date}</p>
+        <p><strong>Expiry Date:</strong> {expiry_date}</p>
         <div className="option-chain-table-container">
           <table>
             <thead>
@@ -90,21 +52,24 @@ function OptionChain() {
               </tr>
             </thead>
             <tbody>
-              {options.map((item, index) => (
-                <tr key={index} style={item.strike_price === atmStrike ? { backgroundColor: '#fffbe6' } : {}}>
-                  <td>{item.call_options?.market_data?.oi}</td>
-                  <td>{item.call_options?.market_data?.volume}</td>
-                  <td>{item.call_options?.option_greeks?.iv?.toFixed(2)}</td>
-                  <td>{item.call_options?.market_data?.ltp}</td>
-                  <td>{item.call_options?.option_greeks?.delta?.toFixed(2)}</td>
-                  <td style={{ fontWeight: 'bold', backgroundColor: '#f8f9fa' }}>{item.strike_price}</td>
-                  <td>{item.put_options?.option_greeks?.delta?.toFixed(2)}</td>
-                  <td>{item.put_options?.market_data?.ltp}</td>
-                  <td>{item.put_options?.option_greeks?.iv?.toFixed(2)}</td>
-                  <td>{item.put_options?.market_data?.volume}</td>
-                  <td>{item.put_options?.market_data?.oi}</td>
-                </tr>
-              ))}
+              {strikes.sort((a, b) => a - b).map((strike) => {
+                const call = options.find(o => o.strike === strike && o.type === 'CE');
+                const put = options.find(o => o.strike === strike && o.type === 'PE');
+                return (
+                  <tr key={strike} style={strike === atmStrike ? { backgroundColor: '#fffbe6' } : {}}>
+                    <td>{call?.oi}</td>
+                    <td>{call?.volume}</td>
+                    <td>{call?.iv?.toFixed(2)}</td>
+                    <td>{call?.ltp}</td>
+                    <td>{call?.delta?.toFixed(2)}</td>
+                    <td style={{ fontWeight: 'bold', backgroundColor: '#f8f9fa' }}>{strike}</td>
+                    <td>{put?.delta?.toFixed(2)}</td>
+                    <td>{put?.ltp}</td>
+                    <td>{put?.iv?.toFixed(2)}</td>
+                    <td>{put?.volume}</td>
+                    <td>{put?.oi}</td>
+                  </tr>
+                )})}
             </tbody>
           </table>
         </div>

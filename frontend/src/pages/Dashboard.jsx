@@ -1,89 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { useData } from '../context/DataContext'
 
 function Dashboard() {
-  const [data, setData] = useState({
-    underlying_price: null,
-    atm_strike: null,
-    aggregated_greeks: null,
-    signals: null,
-    change_from_baseline: null,
-    baseline_greeks: null,
-    timestamp: null,
-    message: "Connecting to server..."
-  })
-  const [connected, setConnected] = useState(false)
-  const [updateCounter, setUpdateCounter] = useState(0) // Add this
-  const wsRef = useRef(null)
+  const { data, connected } = useData();
   const navigate = useNavigate()
-  // Add a ref to track reconnection attempts
-  const reconnectTimeoutRef = useRef(null)
-
-  const connectWebSocket = () => {
-    // Dynamically construct WebSocket URL
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
-    console.log(`🔌 Attempting WebSocket connection to ${wsUrl}`);
-    
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setConnected(true);
-      console.log('✅ WebSocket connected successfully');
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-
-      // Send a ping every 30 seconds to keep the connection alive
-      const keepAlive = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }));
-        }
-      }, 30000);
-      // Store interval ID to clear it on close
-      ws.keepAliveInterval = keepAlive;
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const newData = JSON.parse(event.data);
-        setData(newData);
-        if (newData && newData.timestamp) {
-          console.log('📊 Data updated:', new Date(newData.timestamp).toLocaleTimeString());
-        }
-      } catch (error) {
-        console.error('❌ Error parsing WebSocket data:', error);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('❌ WebSocket error occurred:', error);
-      setConnected(false);
-    };
-
-    ws.onclose = (event) => {
-      setConnected(false);
-      console.log('📡 WebSocket disconnected - Code:', event.code);
-      
-      // Only reconnect if it wasn't a clean close (code 1000) and not already reconnecting
-      if (event.code !== 1000 && !reconnectTimeoutRef.current) {
-        console.log('🔄 Attempting to reconnect in 3 seconds...');
-        reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectTimeoutRef.current = null;
-          console.log('🔄 Reconnecting WebSocket...');
-          connectWebSocket(); // Reconnect without reloading the page
-        }, 3000);
-      }
-
-      // Clear the keep-alive interval when the connection closes
-      if (ws.keepAliveInterval) {
-        clearInterval(ws.keepAliveInterval);
-      }
-    };
-  };
 
   useEffect(() => {
     // Check authentication and load dashboard data
@@ -122,23 +44,7 @@ function Dashboard() {
     }
 
     checkAuth()
-
-    connectWebSocket();
-
-    return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current)
-      }
-      const ws = wsRef.current;
-      if (ws) {
-        // Clear keep-alive and close connection
-        if (ws.keepAliveInterval) {
-          clearInterval(ws.keepAliveInterval);
-        }
-        wsRef.current.close()
-      }
-    }
-  }, []) // Remove navigate dependency to ensure this runs only once
+  }, [navigate])
 
   const getTickCross = (match) => {
     return match ? <span className="tick">✓</span> : <span className="cross">✗</span>
