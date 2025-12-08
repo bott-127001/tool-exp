@@ -27,13 +27,24 @@ function Dashboard() {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
+
+      // Send a ping every 30 seconds to keep the connection alive
+      const keepAlive = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 30000);
+      // Store interval ID to clear it on close
+      ws.keepAliveInterval = keepAlive;
     };
 
     ws.onmessage = (event) => {
       try {
         const newData = JSON.parse(event.data);
         setData(newData);
-        console.log('📊 Data updated:', new Date(newData.timestamp).toLocaleTimeString());
+        if (newData && newData.timestamp) {
+          console.log('📊 Data updated:', new Date(newData.timestamp).toLocaleTimeString());
+        }
       } catch (error) {
         console.error('❌ Error parsing WebSocket data:', error);
       }
@@ -56,6 +67,11 @@ function Dashboard() {
           console.log('🔄 Reconnecting WebSocket...');
           connectWebSocket(); // Reconnect without reloading the page
         }, 3000);
+      }
+
+      // Clear the keep-alive interval when the connection closes
+      if (ws.keepAliveInterval) {
+        clearInterval(ws.keepAliveInterval);
       }
     };
   };
@@ -110,11 +126,16 @@ function Dashboard() {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
-      if (wsRef.current) {
+      const ws = wsRef.current;
+      if (ws) {
+        // Clear keep-alive and close connection
+        if (ws.keepAliveInterval) {
+          clearInterval(ws.keepAliveInterval);
+        }
         wsRef.current.close()
       }
     }
-  }, [navigate])
+  }, []) // Remove navigate dependency to ensure this runs only once
 
   const getTickCross = (match) => {
     return match ? <span className="tick">✓</span> : <span className="cross">✗</span>
@@ -138,7 +159,7 @@ function Dashboard() {
 
   // Check if data is available or just placeholder
   const hasData = data.underlying_price !== null && data.underlying_price !== undefined
-  const { underlying_price, atm_strike, aggregated_greeks, signals } = data
+  const { underlying_price, atm_strike, aggregated_greeks, signals, change_from_baseline, baseline_greeks } = data
 
   const handleLogout = async () => {
     try {
@@ -289,6 +310,76 @@ function Dashboard() {
         </table>
         ) : (
           <p>Waiting for aggregation data...</p>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Change from Baseline</h2>
+        {hasData && change_from_baseline ? (
+        <table>
+          <thead>
+            <tr>
+              <th>Side</th>
+              <th>Δ Delta</th>
+              <th>Δ Vega</th>
+              <th>Δ Theta</th>
+              <th>Δ Gamma</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Call</strong></td>
+              <td>{change_from_baseline?.call?.delta.toFixed(4)}</td>
+              <td>{change_from_baseline?.call?.vega.toFixed(4)}</td>
+              <td>{change_from_baseline?.call?.theta.toFixed(4)}</td>
+              <td>{change_from_baseline?.call?.gamma.toFixed(4)}</td>
+            </tr>
+            <tr>
+              <td><strong>Put</strong></td>
+              <td>{change_from_baseline?.put?.delta.toFixed(4)}</td>
+              <td>{change_from_baseline?.put?.vega.toFixed(4)}</td>
+              <td>{change_from_baseline?.put?.theta.toFixed(4)}</td>
+              <td>{change_from_baseline?.put?.gamma.toFixed(4)}</td>
+            </tr>
+          </tbody>
+        </table>
+        ) : (
+          <p>Waiting for baseline data...</p>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Baseline Greeks (Captured at Session Start)</h2>
+        {hasData && baseline_greeks ? (
+        <table>
+          <thead>
+            <tr>
+              <th>Side</th>
+              <th>Delta Sum</th>
+              <th>Vega Sum</th>
+              <th>Theta Sum</th>
+              <th>Gamma Sum</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Call</strong></td>
+              <td>{baseline_greeks?.call?.delta.toFixed(4)}</td>
+              <td>{baseline_greeks?.call?.vega.toFixed(4)}</td>
+              <td>{baseline_greeks?.call?.theta.toFixed(4)}</td>
+              <td>{baseline_greeks?.call?.gamma.toFixed(4)}</td>
+            </tr>
+            <tr>
+              <td><strong>Put</strong></td>
+              <td>{baseline_greeks?.put?.delta.toFixed(4)}</td>
+              <td>{baseline_greeks?.put?.vega.toFixed(4)}</td>
+              <td>{baseline_greeks?.put?.theta.toFixed(4)}</td>
+              <td>{baseline_greeks?.put?.gamma.toFixed(4)}</td>
+            </tr>
+          </tbody>
+        </table>
+        ) : (
+          <p>Waiting for baseline data...</p>
         )}
       </div>
     </div>
