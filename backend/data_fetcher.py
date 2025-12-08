@@ -2,10 +2,10 @@ import httpx
 import asyncio
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta
-from database import get_user_tokens
-from calc import find_atm_strike, get_atm_plus_otm_options
+from database import get_user_tokens, log_signal
+from calc import find_atm_strike
 from auth import refresh_access_token
-from greek_signals import detect_signals, get_aggregated_greeks
+from greek_signals import detect_signals
 import json
 
 
@@ -35,6 +35,7 @@ def get_tuesday_expiry() -> str:
 # Global state
 latest_data: Optional[Dict] = None
 raw_option_chain: Optional[Dict] = None
+baseline_greeks: Optional[Dict] = None # NEW: To store baseline greeks for the day
 polling_active = False
 should_poll = False  # Flag to control whether polling should actually fetch data
 connection_manager = None
@@ -224,13 +225,67 @@ def normalize_option_chain(upstox_data: Dict) -> Dict:
         traceback.print_exc()
         return None
 
+def aggregate_greeks_atm_otm(normalized_data: Dict) -> Dict:
+    """
+    NEW: Aggregate Greeks for ATM + 10 OTM strikes as per the new plan.
+    """
+    atm_strike = normalized_data.get("atm_strike")
+    options = normalized_data.get("options", [])
+    
+    if not atm_strike or not options:
+        return {"call": {}, "put": {}}
+
+    # Sort strikes to easily find OTM
+    all_strikes = sorted(list(set(opt['strike'] for opt in options)))
+    
+    try:
+        atm_index = all_strikes.index(atm_strike)
+    except ValueError:
+        return {"call": {}, "put": {}} # ATM strike not in list
+
+    # Define the 11 strikes for Calls (ATM and higher) and Puts (ATM and lower)
+    call_strikes = set(all_strikes[atm_index : atm_index + 11])
+    put_strikes = set(all_strikes[max(0, atm_index - 10) : atm_index + 1])
+
+    call_greeks = {"delta": 0, "vega": 0, "theta": 0, "gamma": 0, "option_count": 0}
+    put_greeks = {"delta": 0, "vega": 0, "theta": 0, "gamma": 0, "option_count": 0}
+
+    for opt in options:
+        if opt['type'] == 'CE' and opt['strike'] in call_strikes:
+            call_greeks['delta'] += opt.get('delta', 0)
+            call_greeks['vega'] += opt.get('vega', 0)
+            call_greeks['theta'] += opt.get('theta', 0)
+            call_greeks['gamma'] += opt.get('gamma', 0)
+            call_greeks['option_count'] += 1
+        elif opt['type'] == 'PE' and opt['strike'] in put_strikes:
+            put_greeks['delta'] += opt.get('delta', 0)
+            put_greeks['vega'] += opt.get('vega', 0)
+            put_greeks['theta'] += opt.get('theta', 0)
+            put_greeks['gamma'] += opt.get('gamma', 0)
+            put_greeks['option_count'] += 1
+            
+    return {"call": call_greeks, "put": put_greeks}
+
+def calculate_change_from_baseline(current_greeks: Dict, baseline: Dict) -> Dict:
+    """NEW: Calculate the change between current and baseline greeks."""
+    if not baseline:
+        return {"call": {}, "put": {}} # No baseline to compare against
+    
+    change = {"call": {}, "put": {}}
+    for side in ["call", "put"]:
+        for greek in ["delta", "vega", "theta", "gamma"]:
+            change[side][greek] = current_greeks[side].get(greek, 0) - baseline[side].get(greek, 0)
+    return change
 
 async def polling_worker(manager):
     """Background worker that polls Upstox API every 5 seconds"""
-    global latest_data, raw_option_chain, polling_active, should_poll
+    global latest_data, raw_option_chain, polling_active, should_poll, baseline_greeks
     
     polling_active = True
     current_user = None
+    # State for consecutive signal confirmations, managed within the single polling task
+    # This is robust against multi-worker deployments.
+    signal_confirmation_state: Dict[str, Dict[str, int]] = {}
     
     print("Polling worker started. Waiting for explicit login to start polling...")
     
@@ -292,11 +347,52 @@ async def polling_worker(manager):
                 
                 # We have valid normalized data with options
                 try:
-                    # Calculate aggregated Greeks
-                    aggregated = get_aggregated_greeks(normalized_data)
+                    # NEW: Use the updated aggregation logic (ATM + 10 OTM)
+                    aggregated = aggregate_greeks_atm_otm(normalized_data)
+
+                    # NEW: Set baseline on the first successful fetch of the session
+                    if baseline_greeks is None:
+                        baseline_greeks = aggregated
+                        print("📈 Baseline greeks captured for the day.")
                     
                     # Detect signals
-                    signals = await detect_signals(normalized_data, current_user)
+                    signals = await detect_signals(normalized_data, aggregated, current_user, signal_confirmation_state)
+
+                    # Post-process signals for logging based on confirmation count
+                    settings = await get_user_settings(current_user)
+                    required_confirmations = settings.get("consecutive_confirmations", 2) if settings else 2
+
+                    for signal in signals:
+                        if signal.get("all_matched"):
+                            position = signal["position"]
+                            # Check if we've reached required confirmations
+                            if signal_confirmation_state.get(current_user, {}).get(position, 0) >= required_confirmations:
+                                # Log signal - use ATM strike for the detected position
+                                strike_price = normalized_data["atm_strike"]
+                                strike_ltp = 0
+                                option_type = "CE" if "Call" in position else "PE"
+                                
+                                # Find the LTP for ATM strike of the detected type
+                                for opt in normalized_data["options"]:
+                                    if opt["type"] == option_type and opt["strike"] == strike_price:
+                                        strike_ltp = opt.get("ltp", 0)
+                                        break
+                                await log_signal(
+                                    username=current_user,
+                                    position=position,
+                                    strike_price=strike_price,
+                                    strike_ltp=strike_ltp,
+                                    delta=signal["delta"]["value"],
+                                    vega=signal["vega"]["value"],
+                                    theta=signal["theta"]["value"],
+                                    gamma=signal["gamma"]["value"],
+                                    raw_chain=normalized_data
+                                )
+                                # Reset counter after logging
+                                signal_confirmation_state[current_user][position] = 0
+                    
+                    # NEW: Calculate change from baseline
+                    change_from_baseline = calculate_change_from_baseline(aggregated, baseline_greeks)
                     
                     # Combine all data
                     latest_data = {
@@ -305,6 +401,8 @@ async def polling_worker(manager):
                         "atm_strike": normalized_data["atm_strike"],
                         "expiry_date": normalized_data.get("expiry_date"),
                         "aggregated_greeks": aggregated,
+                        "baseline_greeks": baseline_greeks,
+                        "change_from_baseline": change_from_baseline,
                         "signals": signals,
                         "option_count": len(normalized_data.get("options", []))
                     }
@@ -347,7 +445,7 @@ async def start_polling(manager):
 
 async def stop_polling():
     """Stop the polling worker"""
-    global polling_active, should_poll, latest_data
+    global polling_active, should_poll, latest_data, baseline_greeks
     polling_active = False
     should_poll = False
     print("🛑 Polling stopped")
@@ -356,17 +454,20 @@ async def stop_polling():
 def enable_polling():
     """Enable polling - called after successful login"""
     global should_poll
-    # Reset latest_data to ensure no stale data is shown on new login
-    # latest_data = None 
+    # Reset data on new login to ensure no stale data is shown
+    global latest_data, baseline_greeks
+    latest_data = None
+    baseline_greeks = None # Reset baseline for the new session
     should_poll = True
     print("✅ Polling enabled - will start fetching data")
 
 
 def disable_polling():
     """Disable polling - called on logout"""
-    global should_poll, latest_data
+    global should_poll, latest_data, baseline_greeks
     should_poll = False
     latest_data = None  # Clear the data when polling is disabled
+    baseline_greeks = None # Clear baseline on logout
     print("🛑 Polling disabled - will stop fetching data")
 
 

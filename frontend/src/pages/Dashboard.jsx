@@ -11,6 +11,55 @@ function Dashboard() {
   // Add a ref to track reconnection attempts
   const reconnectTimeoutRef = useRef(null)
 
+  const connectWebSocket = () => {
+    // Dynamically construct WebSocket URL
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+    console.log(`🔌 Attempting WebSocket connection to ${wsUrl}`);
+    
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setConnected(true);
+      console.log('✅ WebSocket connected successfully');
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const newData = JSON.parse(event.data);
+        setData(newData);
+        console.log('📊 Data updated:', new Date(newData.timestamp).toLocaleTimeString());
+      } catch (error) {
+        console.error('❌ Error parsing WebSocket data:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('❌ WebSocket error occurred:', error);
+      setConnected(false);
+    };
+
+    ws.onclose = (event) => {
+      setConnected(false);
+      console.log('📡 WebSocket disconnected - Code:', event.code);
+      
+      // Only reconnect if it wasn't a clean close (code 1000) and not already reconnecting
+      if (event.code !== 1000 && !reconnectTimeoutRef.current) {
+        console.log('🔄 Attempting to reconnect in 3 seconds...');
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectTimeoutRef.current = null;
+          console.log('🔄 Reconnecting WebSocket...');
+          connectWebSocket(); // Reconnect without reloading the page
+        }, 3000);
+      }
+    };
+  };
+
   useEffect(() => {
     // Check authentication and load dashboard data
     const checkAuth = async () => {
@@ -55,87 +104,13 @@ function Dashboard() {
 
     checkAuth()
 
-    // Dynamically construct WebSocket URL
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
-    // Connect to WebSocket
-    console.log(`🔌 Attempting WebSocket connection to ${wsUrl}`)
-    const ws = new WebSocket(wsUrl)
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      setConnected(true)
-      console.log('✅ WebSocket connected successfully')
-      
-      // Clear any pending reconnection
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current)
-        reconnectTimeoutRef.current = null
-      }
-      
-      // Send a ping to keep connection alive
-      const keepAlive = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }))
-        } else {
-          console.warn('⚠️  WebSocket not open, clearing keepalive')
-          clearInterval(keepAlive)
-        }
-      }, 30000)
-      
-      ws.keepAliveInterval = keepAlive
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const newData = JSON.parse(event.data)
-        
-        // Force deep copy and update state
-        const updatedData = JSON.parse(JSON.stringify(newData))
-        
-        // Always update - don't check timestamp in setState
-        setData(updatedData)
-        
-        // Optional: log only timestamp to verify updates
-        console.log('📊 Data updated:', new Date(updatedData.timestamp).toLocaleTimeString())
-      } catch (error) {
-        console.error('❌ Error parsing WebSocket data:', error)
-      }
-    }
-
-    ws.onerror = (error) => {
-      console.error('❌ WebSocket error occurred:', error)
-      setConnected(false)
-    }
-
-    ws.onclose = (event) => {
-      setConnected(false)
-      console.log('📡 WebSocket disconnected - Code:', event.code)
-      
-      if (ws.keepAliveInterval) {
-        clearInterval(ws.keepAliveInterval)
-      }
-      
-      // Only reconnect if it wasn't a clean close (code 1000) and not already reconnecting
-      if (event.code !== 1000 && !reconnectTimeoutRef.current) {
-        console.log('🔄 Attempting to reconnect in 3 seconds...')
-        reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectTimeoutRef.current = null
-          console.log('🔄 Reconnecting WebSocket...')
-          // Force re-render by updating a dummy state or reload
-          window.location.reload()
-        }, 3000)
-      }
-    }
+    connectWebSocket();
 
     return () => {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
       if (wsRef.current) {
-        if (wsRef.current.keepAliveInterval) {
-          clearInterval(wsRef.current.keepAliveInterval)
-        }
         wsRef.current.close()
       }
     }

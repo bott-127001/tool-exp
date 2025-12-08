@@ -1,6 +1,6 @@
 from typing import Dict, List, Tuple, Optional
 from database import get_user_settings, log_signal
-from calc import aggregate_call_put_greeks
+from data_fetcher import aggregate_greeks_atm_otm
 
 # Greek signature patterns for each position
 GREEK_SIGNATURES = {
@@ -9,9 +9,6 @@ GREEK_SIGNATURES = {
     "Short Call": {"delta": "-", "vega": "-", "theta": "+", "gamma": "-"},
     "Short Put": {"delta": "+", "vega": "-", "theta": "+", "gamma": "-"}
 }
-
-# Global state for consecutive confirmations
-signal_confirmation_state: Dict[str, Dict[str, int]] = {}  # {user: {position: count}}
 
 
 def check_greek_sign(actual_value: float, expected_sign: str, threshold: float) -> Tuple[bool, bool]:
@@ -74,7 +71,7 @@ def check_position_pattern(aggregated_greeks: Dict, position: str, settings: Dic
     }
 
 
-async def detect_signals(normalized_data: Dict, username: str) -> List[Dict]:
+async def detect_signals(normalized_data: Dict, aggregated_greeks: Dict, username: str, signal_confirmation_state: dict) -> List[Dict]:
     """
     Detect signals based on Greek signatures
     
@@ -92,60 +89,24 @@ async def detect_signals(normalized_data: Dict, username: str) -> List[Dict]:
             "consecutive_confirmations": 2
         }
     
-    # Aggregate Greeks
-    aggregated_greeks = aggregate_call_put_greeks(normalized_data)
-    
     # Check all positions
     signals = []
     for position in GREEK_SIGNATURES.keys():
         pattern_result = check_position_pattern(aggregated_greeks, position, settings)
         signals.append(pattern_result)
         
-        # Handle consecutive confirmation
+        # Update the confirmation state dictionary passed from the polling worker
         if pattern_result["all_matched"]:
             # Initialize state if needed
             if username not in signal_confirmation_state:
                 signal_confirmation_state[username] = {}
             if position not in signal_confirmation_state[username]:
                 signal_confirmation_state[username][position] = 0
-            
             # Increment confirmation count
             signal_confirmation_state[username][position] += 1
-            
-            # Check if we've reached required confirmations
-            if signal_confirmation_state[username][position] >= settings["consecutive_confirmations"]:
-                # Log signal - use ATM strike for the detected position
-                strike_price = normalized_data["atm_strike"]
-                strike_ltp = 0
-                option_type = "CE" if "Call" in position else "PE"
-                
-                # Find the LTP for ATM strike of the detected type
-                for opt in normalized_data["options"]:
-                    if opt["type"] == option_type and opt["strike"] == strike_price:
-                        strike_ltp = opt.get("ltp", 0)
-                        break
-                await log_signal(
-                    username=username,
-                    position=position,
-                    strike_price=strike_price,
-                    strike_ltp=strike_ltp,
-                    delta=pattern_result["delta"]["value"],
-                    vega=pattern_result["vega"]["value"],
-                    theta=pattern_result["theta"]["value"],
-                    gamma=pattern_result["gamma"]["value"],
-                    raw_chain=normalized_data
-                )
-                
-                # Reset counter after logging
-                signal_confirmation_state[username][position] = 0
         else:
             # Reset confirmation if pattern doesn't match
             if username in signal_confirmation_state and position in signal_confirmation_state[username]:
                 signal_confirmation_state[username][position] = 0
     
     return signals
-
-
-def get_aggregated_greeks(normalized_data: Dict) -> Dict:
-    """Get aggregated Greeks (wrapper function)"""
-    return aggregate_call_put_greeks(normalized_data)

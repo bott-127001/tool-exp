@@ -16,8 +16,7 @@ load_dotenv()
 from auth import auth_router
 from database import init_db, get_user_settings, update_user_settings
 from data_fetcher import start_polling, stop_polling, get_latest_data
-from greek_signals import detect_signals, get_aggregated_greeks
-from calc import aggregate_call_put_greeks
+from greek_signals import detect_signals
 
 # For data export
 from fastapi.responses import StreamingResponse
