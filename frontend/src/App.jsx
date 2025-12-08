@@ -5,7 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Settings from './pages/Settings'
 import TradeLogs from './pages/TradeLogs'
 import OptionChain from './pages/OptionChain'
-import { DataProvider } from './context/DataContext'
+import { DataProvider } from './pages/DataContext'
 
 function App() {
   return (

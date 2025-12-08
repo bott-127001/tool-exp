@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React from 'react'
 import { Link } from 'react-router-dom'
-import { useData } from '../context/DataContext'
+import { useData } from './DataContext'
 
 function OptionChain() {
   const { data } = useData();
