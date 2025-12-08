@@ -1,11 +1,12 @@
 import httpx
 import asyncio
 from typing import Optional, Dict, List
-from datetime import datetime, timedelta
-from database import get_user_tokens, log_signal
+from datetime import datetime, timedelta, timezone
+from database import get_user_settings, get_user_tokens, log_signal
 from calc import find_atm_strike
 from auth import refresh_access_token
 from greek_signals import detect_signals
+from utils import aggregate_greeks_atm_otm
 import json
 
 
@@ -15,20 +16,20 @@ def get_tuesday_expiry() -> str:
     If today is Tuesday before market close (3:30 PM IST), returns today
     Otherwise returns next Tuesday
     """
-    today = datetime.now()
+    now_utc = datetime.now(timezone.utc)
+    market_close_utc_hour = 10 # 3:30 PM IST is 10:00 AM UTC
     
-    # Calculate days until next Tuesday (Tuesday = 1 in weekday, Monday = 0)
-    days_until_tuesday = (1 - today.weekday()) % 7
+    # Monday is 0, Tuesday is 1
+    days_until_tuesday = (1 - now_utc.weekday() + 7) % 7
     
-    # If today is Tuesday
     if days_until_tuesday == 0:
-        # Check if before market close (3:30 PM IST = 10:00 AM UTC)
-        # For simplicity, if it's Tuesday, use today's date
-        # You can adjust this logic based on your needs
-        expiry_date = today
+        # If it's Tuesday, check if we are past market close time
+        if now_utc.hour >= market_close_utc_hour:
+            expiry_date = now_utc + timedelta(days=7) # Get next week's Tuesday
+        else:
+            expiry_date = now_utc # Use today
     else:
-        # Get next Tuesday
-        expiry_date = today + timedelta(days=days_until_tuesday)
+        expiry_date = now_utc + timedelta(days=days_until_tuesday)
     
     return expiry_date.strftime("%Y-%m-%d")
 
@@ -224,47 +225,6 @@ def normalize_option_chain(upstox_data: Dict) -> Dict:
         import traceback
         traceback.print_exc()
         return None
-
-def aggregate_greeks_atm_otm(normalized_data: Dict) -> Dict:
-    """
-    NEW: Aggregate Greeks for ATM + 10 OTM strikes as per the new plan.
-    """
-    atm_strike = normalized_data.get("atm_strike")
-    options = normalized_data.get("options", [])
-    
-    if not atm_strike or not options:
-        return {"call": {}, "put": {}}
-
-    # Sort strikes to easily find OTM
-    all_strikes = sorted(list(set(opt['strike'] for opt in options)))
-    
-    try:
-        atm_index = all_strikes.index(atm_strike)
-    except ValueError:
-        return {"call": {}, "put": {}} # ATM strike not in list
-
-    # Define the 11 strikes for Calls (ATM and higher) and Puts (ATM and lower)
-    call_strikes = set(all_strikes[atm_index : atm_index + 11])
-    put_strikes = set(all_strikes[max(0, atm_index - 10) : atm_index + 1])
-
-    call_greeks = {"delta": 0, "vega": 0, "theta": 0, "gamma": 0, "option_count": 0}
-    put_greeks = {"delta": 0, "vega": 0, "theta": 0, "gamma": 0, "option_count": 0}
-
-    for opt in options:
-        if opt['type'] == 'CE' and opt['strike'] in call_strikes:
-            call_greeks['delta'] += opt.get('delta', 0)
-            call_greeks['vega'] += opt.get('vega', 0)
-            call_greeks['theta'] += opt.get('theta', 0)
-            call_greeks['gamma'] += opt.get('gamma', 0)
-            call_greeks['option_count'] += 1
-        elif opt['type'] == 'PE' and opt['strike'] in put_strikes:
-            put_greeks['delta'] += opt.get('delta', 0)
-            put_greeks['vega'] += opt.get('vega', 0)
-            put_greeks['theta'] += opt.get('theta', 0)
-            put_greeks['gamma'] += opt.get('gamma', 0)
-            put_greeks['option_count'] += 1
-            
-    return {"call": call_greeks, "put": put_greeks}
 
 def calculate_change_from_baseline(current_greeks: Dict, baseline: Dict) -> Dict:
     """NEW: Calculate the change between current and baseline greeks."""

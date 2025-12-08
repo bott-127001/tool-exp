@@ -1,6 +1,6 @@
 from typing import Dict, List, Tuple, Optional
 from database import get_user_settings, log_signal
-from data_fetcher import aggregate_greeks_atm_otm
+from utils import aggregate_greeks_atm_otm
 
 # Greek signature patterns for each position
 GREEK_SIGNATURES = {
