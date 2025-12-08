@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { useCurrentUser } from '../hooks/useCurrentUser'
+import { useCurrentUser } from './useCurrentUser'
 
 function TradeLogs() {
   const [logs, setLogs] = useState([])
