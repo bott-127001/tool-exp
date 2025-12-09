@@ -34,7 +34,7 @@ function Login() {
         </button>
         
         <button
-          className="btn btn-primary"
+          className="btn btn-success"
           onClick={() => handleLogin('prajwal')}
           style={{ width: '100%', padding: '15px' }}
         >

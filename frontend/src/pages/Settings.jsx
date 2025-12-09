@@ -96,10 +96,11 @@ function Settings() {
         )}
 
         <form onSubmit={handleSave}>
-          <label>
-            Delta Threshold (absolute)
+          <div className="form-group">
+            <label htmlFor="delta_threshold">Delta Threshold (absolute)</label>
             <input
               type="number"
+              id="delta_threshold"
               name="delta_threshold"
               value={settings.delta_threshold}
               onChange={handleChange}
@@ -107,12 +108,13 @@ function Settings() {
               min="0"
               required
             />
-          </label>
-
-          <label>
-            Vega Threshold (absolute)
+          </div>
+  
+          <div className="form-group">
+            <label htmlFor="vega_threshold">Vega Threshold (absolute)</label>
             <input
               type="number"
+              id="vega_threshold"
               name="vega_threshold"
               value={settings.vega_threshold}
               onChange={handleChange}
@@ -120,12 +122,13 @@ function Settings() {
               min="0"
               required
             />
-          </label>
+          </div>
 
-          <label>
-            Theta Threshold (absolute)
+          <div className="form-group">
+            <label htmlFor="theta_threshold">Theta Threshold (absolute)</label>
             <input
               type="number"
+              id="theta_threshold"
               name="theta_threshold"
               value={settings.theta_threshold}
               onChange={handleChange}
@@ -133,12 +136,13 @@ function Settings() {
               min="0"
               required
             />
-          </label>
+          </div>
 
-          <label>
-            Gamma Threshold (absolute)
+          <div className="form-group">
+            <label htmlFor="gamma_threshold">Gamma Threshold (absolute)</label>
             <input
               type="number"
+              id="gamma_threshold"
               name="gamma_threshold"
               value={settings.gamma_threshold}
               onChange={handleChange}
@@ -146,12 +150,13 @@ function Settings() {
               min="0"
               required
             />
-          </label>
+          </div>
 
-          <label>
-            Consecutive Confirmations
+          <div className="form-group">
+            <label htmlFor="consecutive_confirmations">Consecutive Confirmations</label>
             <input
               type="number"
+              id="consecutive_confirmations"
               name="consecutive_confirmations"
               value={settings.consecutive_confirmations}
               onChange={handleChange}
@@ -159,13 +164,12 @@ function Settings() {
               min="1"
               required
             />
-          </label>
+          </div>
 
           <button
             type="submit"
             className="btn btn-primary"
             disabled={saving}
-            style={{ marginTop: '20px' }}
           >
             {saving ? 'Saving...' : 'Save Settings'}
           </button>
