@@ -29,7 +29,7 @@ function OptionChain() {
       <>
         <p><strong>Underlying Price:</strong> {underlyingPrice?.toFixed(2)} | <strong>ATM Strike:</strong> {atmStrike}</p>
         <p><strong>Expiry Date:</strong> {expiry_date}</p>
-        <div className="option-chain-table-container">
+        <div className="table-responsive-wrapper">
           <table>
             <thead>
               <tr>

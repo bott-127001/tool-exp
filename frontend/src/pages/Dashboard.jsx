@@ -46,7 +46,7 @@ function Dashboard() {
         <Link to="/settings">Settings</Link>
         <Link to="/logs">Trade Logs</Link>
         <Link to="/option-chain">Option Chain</Link>
-        <div style={{ float: 'right' }}>
+        <div className="nav-right">
           <span className={`status-indicator ${connected ? 'status-online' : 'status-offline'}`}></span>
           {connected ? 'Connected' : 'Disconnected'}
           <button 
@@ -86,7 +86,8 @@ function Dashboard() {
       <div className="card">
         <h2>Greek Signature Detector</h2>
         {hasData && signals && signals.length > 0 ? (
-        <table>
+        <div className="table-responsive-wrapper">
+          <table>
           <thead>
             <tr>
               <th>Position</th>
@@ -124,6 +125,7 @@ function Dashboard() {
             ))}
           </tbody>
         </table>
+        </div>
         ) : (
           <p>Waiting for signal data...</p>
         )}
@@ -132,7 +134,8 @@ function Dashboard() {
       <div className="card">
         <h2>Call/Put Aggregation</h2>
         {hasData && aggregated_greeks ? (
-        <table>
+        <div className="table-responsive-wrapper">
+          <table>
           <thead>
             <tr>
               <th>Side</th>
@@ -162,6 +165,7 @@ function Dashboard() {
             </tr>
           </tbody>
         </table>
+        </div>
         ) : (
           <p>Waiting for aggregation data...</p>
         )}
@@ -170,7 +174,8 @@ function Dashboard() {
       <div className="card">
         <h2>Change from Baseline</h2>
         {hasData && change_from_baseline ? (
-        <table>
+        <div className="table-responsive-wrapper">
+          <table>
           <thead>
             <tr>
               <th>Side</th>
@@ -197,6 +202,7 @@ function Dashboard() {
             </tr>
           </tbody>
         </table>
+        </div>
         ) : (
           <p>Waiting for baseline data...</p>
         )}
@@ -205,7 +211,8 @@ function Dashboard() {
       <div className="card">
         <h2>Baseline Greeks (Captured at Session Start)</h2>
         {hasData && baseline_greeks ? (
-        <table>
+        <div className="table-responsive-wrapper">
+          <table>
           <thead>
             <tr>
               <th>Side</th>
@@ -232,6 +239,7 @@ function Dashboard() {
             </tr>
           </tbody>
         </table>
+        </div>
         ) : (
           <p>Waiting for baseline data...</p>
         )}
