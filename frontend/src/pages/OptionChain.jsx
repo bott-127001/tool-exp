@@ -78,18 +78,12 @@ function OptionChain() {
   }
 
   return (
-    <div className="container">
-      <div className="nav">
-        <Link to="/dashboard">Dashboard</Link>
-        <Link to="/settings">Settings</Link>
-        <Link to="/logs">Trade Logs</Link>
-        <Link to="/option-chain">Option Chain</Link>
-      </div>
+    <>
       <div className="card">
         <h2>NIFTY50 Option Chain</h2>
         {renderTable()}
       </div>
-    </div>
+    </>
   )
 }
 

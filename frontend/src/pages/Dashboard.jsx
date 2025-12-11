@@ -1,11 +1,8 @@
 import React from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import axios from 'axios'
 import { useData } from './DataContext'
 
 function Dashboard() {
   const { data, connected } = useData();
-  const navigate = useNavigate();
 
   const getTickCross = (match) => {
     return match ? <span className="tick">✓</span> : <span className="cross">✗</span>
@@ -15,58 +12,8 @@ function Dashboard() {
   const hasData = data.underlying_price !== null && data.underlying_price !== undefined
   const { underlying_price, atm_strike, aggregated_greeks, signals, change_from_baseline, baseline_greeks } = data
 
-  const handleLogout = async () => {
-    try {
-      // Get current user from localStorage or check both
-      const currentUser = localStorage.getItem('currentUser') || 'samarth'
-      
-      // Try to logout the current user
-      await axios.post(`/api/auth/logout/${currentUser}`)
-        .catch(() => {
-          // If samarth fails, try prajwal
-          return axios.post('/api/auth/logout/prajwal')
-        })
-      
-      // Clear localStorage
-      localStorage.removeItem('currentUser')
-      
-      // Redirect to login
-      navigate('/login')
-    } catch (error) {
-      console.error('Logout error:', error)
-      // Still redirect to login even if logout fails
-      navigate('/login')
-    }
-  }
-
   return (
-    <div className="container">
-      <div className="nav">
-        <Link to="/dashboard">Dashboard</Link>
-        <Link to="/settings">Settings</Link>
-        <Link to="/logs">Trade Logs</Link>
-        <Link to="/option-chain">Option Chain</Link>
-        <div className="nav-right">
-          <span className={`status-indicator ${connected ? 'status-online' : 'status-offline'}`}></span>
-          {connected ? 'Connected' : 'Disconnected'}
-          <button 
-            onClick={handleLogout}
-            style={{
-              marginLeft: '15px',
-              padding: '5px 15px',
-              backgroundColor: '#dc3545',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px'
-            }}
-          >
-            Logout
-          </button>
-        </div>
-      </div>
-
+    <>
       <div className="card">
         <h2>Market Data</h2>
         {hasData ? (
@@ -244,7 +191,7 @@ function Dashboard() {
           <p>Waiting for baseline data...</p>
         )}
       </div>
-    </div>
+    </>
   )
 }
 

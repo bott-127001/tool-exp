@@ -39,21 +39,27 @@ export function DataProvider({ children }) {
         reconnectTimeoutRef.current = null;
       }
 
-      const keepAlive = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }));
+      // Store the interval ID on the wsRef.current object itself
+      // This ensures it's tied to the specific WebSocket instance
+      wsRef.current.keepAliveInterval = setInterval(() => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          // console.log('[Context] Sending ping to server'); // Uncomment for debug
+          wsRef.current.send(JSON.stringify({ type: 'ping' }));
         }
       }, 30000);
-      ws.keepAliveInterval = keepAlive;
     };
 
     ws.onmessage = (event) => {
       try {
         const newData = JSON.parse(event.data);
-        setData(newData);
-        // The raw chain data is now part of the main payload from the backend
-        // We can extract it if it exists, or fetch separately if needed.
-        // For now, we assume the main `data` object is sufficient.
+        
+        // Explicitly handle pong messages from the server heartbeat
+        if (newData.type === 'pong') {
+          // console.log('[Context] Pong received from server'); // Uncomment for debug
+          return; // It's just a heartbeat, no state update needed
+        }
+
+        setData(newData); // Update state with actual data
         if (newData && newData.timestamp) {
           console.log('[Context] 📊 Data updated:', new Date(newData.timestamp).toLocaleTimeString());
         }
@@ -71,14 +77,14 @@ export function DataProvider({ children }) {
       setConnected(false);
       console.log(`[Context] 📡 WebSocket disconnected - Code: ${event.code}`);
 
-      if (ws.keepAliveInterval) {
-        clearInterval(ws.keepAliveInterval);
+      if (wsRef.current && wsRef.current.keepAliveInterval) {
+        clearInterval(wsRef.current.keepAliveInterval);
       }
 
       if (event.code !== 1000 && !reconnectTimeoutRef.current) {
         console.log('[Context] 🔄 Attempting to reconnect in 3 seconds...');
         reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectTimeoutRef.current = null;
+          reconnectTimeoutRef.current = null; // Clear the ref after the timeout fires
           connectWebSocket();
         }, 3000);
       }
@@ -94,8 +100,8 @@ export function DataProvider({ children }) {
       }
       const ws = wsRef.current;
       if (ws) {
-        if (ws.keepAliveInterval) {
-          clearInterval(ws.keepAliveInterval);
+        if (wsRef.current && wsRef.current.keepAliveInterval) {
+          clearInterval(wsRef.current.keepAliveInterval);
         }
         ws.close();
       }

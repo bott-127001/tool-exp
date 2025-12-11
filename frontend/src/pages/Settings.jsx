@@ -17,26 +17,21 @@ function Settings() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    if (!currentUser) {
-      return; // Wait for user to be loaded
-    }
-    // Load current settings
-    const loadSettings = async () => {
-      try {
-        const response = await axios.get(`/api/settings/${currentUser}`)
-        if (response.data) {
-          setSettings(response.data)
+    // Since this is a protected route, we can safely assume currentUser will be available.
+    if (currentUser) {
+      const loadSettings = async () => {
+        try {
+          const response = await axios.get(`/api/settings/${currentUser}`);
+          if (response.data) {
+            setSettings(response.data);
+          }
+        } catch (error) {
+          console.error('Error loading settings:', error);
         }
-      } catch (error) {
-        console.error('Error loading settings:', error)
-        if (error.response?.status === 401) {
-          navigate('/login')
-        }
-      }
+      };
+      loadSettings();
     }
-
-    loadSettings()
-  }, [currentUser, navigate])
+  }, [currentUser]);
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -73,14 +68,7 @@ function Settings() {
   }
 
   return (
-    <div className="container">
-      <div className="nav">
-        <Link to="/dashboard">Dashboard</Link>
-        <Link to="/settings">Settings</Link>
-        <Link to="/logs">Trade Logs</Link>
-        <Link to="/option-chain">Option Chain</Link>
-      </div>
-
+    <>
       <div className="card">
         <h2>Settings</h2>
         {message && (
@@ -175,7 +163,7 @@ function Settings() {
           </button>
         </form>
       </div>
-    </div>
+    </>
   )
 }
 

@@ -5,6 +5,8 @@ import Dashboard from './pages/Dashboard'
 import Settings from './pages/Settings'
 import TradeLogs from './pages/TradeLogs'
 import OptionChain from './pages/OptionChain'
+import Layout from './pages/Layout'
+import ProtectedRoute from './pages/ProtectedRoute' // Import the new gatekeeper
 import { DataProvider } from './pages/DataContext'
 
 function App() {
@@ -12,12 +14,16 @@ function App() {
     <DataProvider>
       <Router>
         <Routes>
-          <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/logs" element={<TradeLogs />} />
-          <Route path="/option-chain" element={<OptionChain />} />
+          <Route element={<ProtectedRoute />}>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="settings" element={<Settings />} />
+              <Route path="logs" element={<TradeLogs />} />
+              <Route path="option-chain" element={<OptionChain />} />
+            </Route>
+          </Route>
         </Routes>
       </Router>
     </DataProvider>

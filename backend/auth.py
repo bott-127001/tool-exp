@@ -307,18 +307,23 @@ async def check_auth(user: str):
     return {"authenticated": False}
 
 
-@auth_router.post("/logout/{user}")
-async def logout(user: str):
+@auth_router.post("/logout")
+async def logout():
     """Logout a user by clearing their tokens and stopping polling"""
-    from data_fetcher import disable_polling
+    from data_fetcher import disable_polling, get_current_authenticated_user
     
-    await clear_user_tokens(user)
+    # Find the currently authenticated user
+    current_user = await get_current_authenticated_user()
     
-    # Disable polling on logout
-    disable_polling()
+    if current_user:
+        await clear_user_tokens(current_user)
+        # Disable polling on logout
+        disable_polling()
+        print(f"✓ Logged out {current_user} - tokens cleared and polling stopped")
+        return {"message": f"Logged out {current_user} successfully"}
     
-    print(f"✓ Logged out {user} - tokens cleared and polling stopped")
-    return {"message": f"Logged out {user} successfully"}
+    # If no user was found to be logged in, still confirm the action
+    return {"message": "No active user session found to log out."}
 
 
 async def refresh_access_token(username: str) -> Optional[str]:
