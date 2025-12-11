@@ -213,7 +213,7 @@ def normalize_option_chain(upstox_data: Dict) -> Dict:
         expiry_date = upstox_data.get("_expiry_date") or get_tuesday_expiry()
         
         return {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "underlying_price": underlying_price,
             "atm_strike": atm_strike,
             "expiry_date": expiry_date,
@@ -286,7 +286,7 @@ async def polling_worker(manager):
             # Immediately set a placeholder message so the frontend knows the user is authenticated
             # This prevents the redirect loop on the frontend.
             latest_data = {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "underlying_price": None,
                 "atm_strike": None,
                 "message": f"Authenticated as {current_user}. Waiting for first data poll..."
