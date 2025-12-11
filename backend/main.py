@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 from contextlib import asynccontextmanager
@@ -15,7 +15,7 @@ load_dotenv()
 
 from auth import auth_router
 from database import init_db, get_user_settings, update_user_settings
-from data_fetcher import start_polling, stop_polling, get_latest_data
+from data_fetcher import start_polling, stop_polling, get_latest_data, get_current_authenticated_user
 from greek_signals import detect_signals
 
 # For data export
@@ -152,6 +152,15 @@ async def test_ws():
         "websocket_endpoint": "ws://localhost:8000/ws",
         "active_connections": len(manager.active_connections)
     }
+
+
+@app.get("/api/auth/current-user")
+async def get_current_user():
+    """
+    Returns the currently authenticated user, if any.
+    """
+    user = await get_current_authenticated_user()
+    return JSONResponse(content={"user": user})
 
 
 @app.get("/api/settings/{user}")
