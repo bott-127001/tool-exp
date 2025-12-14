@@ -39,7 +39,6 @@ raw_option_chain: Optional[Dict] = None
 baseline_greeks: Optional[Dict] = None # NEW: To store baseline greeks for the day
 polling_active = False
 should_poll = False  # Flag to control whether polling should actually fetch data
-current_user: Optional[str] = None # The user for the current polling session
 from ws_manager import manager # Import the shared manager instance
 # Upstox API endpoints
 UPSTOX_BASE_URL = "https://api.upstox.com/v2"
@@ -264,7 +263,7 @@ async def clear_daily_baseline(username: str, date_str: str):
 
 async def polling_worker():
     """Background worker that polls Upstox API every 5 seconds"""
-    global latest_data, raw_option_chain, polling_active, should_poll, baseline_greeks, current_user
+    global latest_data, raw_option_chain, polling_active, should_poll, baseline_greeks
     
     polling_active = True
     current_user = None
@@ -276,16 +275,55 @@ async def polling_worker():
     
     # Main polling loop - wait for explicit enable via login
     while polling_active:
-        try:
-            # Only poll if should_poll is True AND we have an authenticated user
-            if not should_poll or not current_user:
-                # Polling disabled or no user - wait and check again
-                await asyncio.sleep(1)
-                continue
-            
-            # We have an authenticated user and polling is enabled
+        # Only poll if should_poll is True AND we have an authenticated user
+        if not should_poll:
             # Polling disabled - wait and check again
-            
+            await asyncio.sleep(1)
+            continue
+        
+        # Find authenticated user (first available)
+        found_user = None
+        for user in ["samarth", "prajwal"]:
+            tokens = await get_user_tokens(user)
+            if tokens:
+                import time
+                # Check if token exists and is not null
+                if tokens.get("access_token") and tokens["token_expires_at"] > time.time():
+                    found_user = user
+                    break
+        
+        if not found_user:
+            # No authenticated user found - reset and wait
+            if current_user:
+                print(f"⚠️  No authenticated user available. Stopping polling...")
+                current_user = None
+                # Disable polling when user logs out
+                # should_poll = False # Let logout handle this
+            await asyncio.sleep(2)
+            continue
+        
+        # We have an authenticated user and polling is enabled
+        if found_user != current_user:
+            current_user = found_user
+            print(f"✓ Authenticated user found: {current_user}")
+            print(f"Starting polling for {current_user}...")
+            # Immediately set a placeholder message so the frontend knows the user is authenticated
+            # This prevents the redirect loop on the frontend.
+            latest_data = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "aggregated_greeks": None,
+                "baseline_greeks": None,
+                "change_from_baseline": None,
+                "signals": [],
+                "option_count": 0,
+                "options": [],
+                "underlying_price": None,
+                "atm_strike": None,
+                "message": f"Authenticated as {current_user}. Waiting for first data poll..."
+            }
+
+        
+        try:
             # On first poll for a user, try to load baseline from DB
             if baseline_greeks is None:
                 today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -419,41 +457,20 @@ async def stop_polling():
 
 
 def enable_polling():
-    """
-    Enable polling - called after successful login.
-    This is now the primary function to set the session user.
-    """
-    global should_poll, latest_data, current_user
-    
-    # This function now needs to determine the user.
-    # We'll do a one-time check here.
-    import time
-    found_user = None
-    for user in ["samarth", "prajwal"]:
-        # This is a blocking call inside an async context, which is not ideal,
-        # but acceptable for a one-time setup action.
-        tokens = asyncio.run(get_user_tokens(user))
-        if tokens and tokens.get("access_token") and tokens.get("token_expires_at", 0) > time.time():
-            found_user = user
-            break
-
-    if not found_user:
-        print("❌ enable_polling called, but no valid authenticated user found.")
-        return
-
-    current_user = found_user
+    """Enable polling - called after successful login"""
+    global should_poll
+    global latest_data
     latest_data = None
     reset_baseline_greeks() # Clear in-memory baseline to force a reload from DB on next poll
     should_poll = True
-    print(f"✅ Polling enabled for user: {current_user}. Will start fetching data.")
+    print("✅ Polling enabled - will start fetching data")
 
 
 def disable_polling():
     """Disable polling - called on logout"""
-    global should_poll, latest_data, current_user
+    global should_poll, latest_data
     should_poll = False
     latest_data = None  # Clear the data when polling is disabled
-    current_user = None # Clear the active user
     reset_baseline_greeks() # Clear in-memory baseline on logout
     print("🛑 Polling disabled - will stop fetching data")
 
@@ -479,8 +496,13 @@ def get_raw_option_chain() -> Optional[Dict]:
 
 async def get_current_authenticated_user() -> Optional[str]:
     """
-    Returns the username of the user whose session is currently driving the polling.
-    This is now the single source of truth for the active user.
+    Checks which user has a valid, active token and returns their username.
     """
-    global current_user
-    return current_user
+    import time
+    for user in ["samarth", "prajwal"]:
+        tokens = await get_user_tokens(user)
+        if tokens:
+            # Check if token exists, is not null, and is not expired
+            if tokens.get("access_token") and tokens.get("token_expires_at", 0) > time.time():
+                return user
+    return None
