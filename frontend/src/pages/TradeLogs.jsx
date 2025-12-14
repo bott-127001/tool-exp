@@ -1,19 +1,16 @@
 import React, { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { useCurrentUser } from './useCurrentUser'
+import { useAuth } from './AuthContext' // Import the correct hook
 
 function TradeLogs() {
   const [logs, setLogs] = useState([])
-  const currentUser = useCurrentUser()
+  const { currentUser } = useAuth() // Use the correct hook
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
 
   useEffect(() => {
     const loadLogs = async () => {
-      if (!currentUser) {
-        return; // Wait until currentUser is loaded
-      }
       try {
         const response = await axios.get(`/api/logs/${currentUser}`)
         if (response.data && response.data.logs) {
@@ -29,39 +26,28 @@ function TradeLogs() {
       }
     }
 
-    loadLogs()
+    if (currentUser) {
+      loadLogs()
 
-    // Refresh logs every 10 seconds
-    const interval = setInterval(loadLogs, 10000)
-    return () => clearInterval(interval)
+      // Refresh logs every 10 seconds
+      const interval = setInterval(loadLogs, 10000)
+      return () => clearInterval(interval)
+    } else {
+      setLoading(false); // If there's no user, stop loading
+    }
   }, [currentUser, navigate])
 
-  if (loading) {
-    return (
-      <div className="container">
-        <div className="card">
-          <p>Loading trade logs...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="container">
-      <div className="nav">
-        <Link to="/dashboard">Dashboard</Link>
-        <Link to="/settings">Settings</Link>
-        <Link to="/logs">Trade Logs</Link>
-        <Link to="/option-chain">Option Chain</Link>
-      </div>
-
-      <div className="card">
-        <h2>Trade Logs</h2>
-        <p>Detected signals for: <strong>{currentUser || '...'}</strong></p>
-        
-        {logs.length === 0 ? (
-          <p style={{ marginTop: '20px', color: '#666' }}>No signals detected yet.</p>
-        ) : (
+    <div className="card">
+      <h2>Trade Logs</h2>
+      <p>Detected signals for: <strong>{currentUser || '...'}</strong></p>
+      
+      {loading ? (
+        <p>Loading trade logs...</p>
+      ) : logs.length === 0 ? (
+        <p style={{ marginTop: '20px', color: '#666' }}>No signals detected yet.</p>
+      ) : (
+        <div className="table-responsive-wrapper">
           <table>
             <thead>
               <tr>
@@ -69,29 +55,21 @@ function TradeLogs() {
                 <th>Position</th>
                 <th>Strike Price</th>
                 <th>Strike LTP</th>
-                <th>Delta</th>
-                <th>Vega</th>
-                <th>Theta</th>
-                <th>Gamma</th>
               </tr>
             </thead>
             <tbody>
               {logs.map((log, index) => (
                 <tr key={index}>
                   <td>{new Date(log.timestamp).toLocaleString()}</td>
-                  <td><strong>{log.detected_position}</strong></td>
+                  <td style={{ fontWeight: 'bold' }}>{log.detected_position}</td>
                   <td>{log.strike_price}</td>
                   <td>{log.strike_ltp?.toFixed(2)}</td>
-                  <td>{log.delta.toFixed(4)}</td>
-                  <td>{log.vega.toFixed(4)}</td>
-                  <td>{log.theta.toFixed(4)}</td>
-                  <td>{log.gamma.toFixed(4)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
