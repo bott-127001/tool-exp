@@ -40,7 +40,7 @@ baseline_greeks: Optional[Dict] = None # NEW: To store baseline greeks for the d
 polling_active = False
 should_poll = False  # Flag to control whether polling should actually fetch data
 connection_manager = None
-
+from main import manager # Import the global manager instance
 # Upstox API endpoints
 UPSTOX_BASE_URL = "https://api.upstox.com/v2"
 UPSTOX_OPTION_CHAIN_URL = f"{UPSTOX_BASE_URL}/option/chain"
@@ -262,7 +262,7 @@ async def clear_daily_baseline(username: str, date_str: str):
     if result.deleted_count > 0:
         print(f"🗑️ Cleared baseline from DB for {username} on {date_str}")
 
-async def polling_worker(manager):
+async def polling_worker():
     """Background worker that polls Upstox API every 5 seconds"""
     global latest_data, raw_option_chain, polling_active, should_poll, baseline_greeks
     
@@ -422,18 +422,12 @@ async def polling_worker(manager):
                     # Broadcast to WebSocket clients
                     if manager:
                         await manager.broadcast(latest_data)
-
                         # Import here to avoid circular dependency
                         from database import log_market_data
                         # Log the data to the database for ML training
                         await log_market_data(latest_data)
-                    else:
-                        print(f"⚠️  No WebSocket manager available")
                 except Exception as e:
                     print(f"⚠️  Error processing data: {e}")
-            
-            # Wait 5 seconds before next poll
-            await asyncio.sleep(5)
         
         except asyncio.CancelledError:
             break
@@ -441,6 +435,8 @@ async def polling_worker(manager):
             print(f"Error in polling worker: {str(e)}")
             import traceback
             traceback.print_exc()
+        finally:
+            # Wait 5 seconds before next poll, even if an error occurred
             await asyncio.sleep(5)
     
     polling_active = False
@@ -448,11 +444,9 @@ async def polling_worker(manager):
     print("Polling worker stopped")
 
 
-async def start_polling(manager):
+async def start_polling():
     """Start the polling worker"""
-    global connection_manager # Make sure we're modifying the global variable
-    connection_manager = manager # Assign the passed manager to the global
-    await polling_worker(manager) # Start the worker
+    await polling_worker() # Start the worker
 
 
 async def stop_polling():

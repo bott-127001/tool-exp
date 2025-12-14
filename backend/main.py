@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     print("Backend server ready. Polling will start automatically when a user authenticates.")
     
     # Start background polling task (will wait for authentication)
-    polling_task = asyncio.create_task(start_polling(manager)) # Pass the manager instance
+    polling_task = asyncio.create_task(start_polling()) # The worker will use the global manager
     
     yield
     
