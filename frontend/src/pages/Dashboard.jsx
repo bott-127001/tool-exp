@@ -1,5 +1,6 @@
 import React from 'react'
 import { useData } from './DataContext'
+import axios from 'axios';
 
 function Dashboard() {
   const { data, connected } = useData();
@@ -11,6 +12,18 @@ function Dashboard() {
   // Check if data is available or just placeholder
   const hasData = data.underlying_price !== null && data.underlying_price !== undefined
   const { underlying_price, atm_strike, aggregated_greeks, signals, change_from_baseline, baseline_greeks } = data
+
+  const handleResetBaseline = async () => {
+    if (window.confirm('Are you sure you want to reset the baseline for today? A new baseline will be captured on the next data update.')) {
+      try {
+        const response = await axios.post('/api/reset-baseline');
+        alert(response.data.message || 'Baseline reset successfully!');
+      } catch (error) {
+        console.error('Failed to reset baseline:', error);
+        alert('Failed to reset baseline. Please check the console for errors.');
+      }
+    }
+  };
 
   return (
     <>
@@ -190,6 +203,22 @@ function Dashboard() {
         ) : (
           <p>Waiting for baseline data...</p>
         )}
+        <button
+          onClick={handleResetBaseline}
+          style={{
+            marginTop: '15px',
+            padding: '8px 15px',
+            backgroundColor: '#ffc107',
+            color: '#212529',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 'bold'
+          }}
+          title="Clears today's baseline from the database and recaptures it on the next poll. Use this to start a new day."
+        >
+          Reset Today's Baseline
+        </button>
       </div>
     </>
   )

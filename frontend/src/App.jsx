@@ -7,26 +7,29 @@ import TradeLogs from './pages/TradeLogs'
 import OptionChain from './pages/OptionChain'
 import Layout from './pages/Layout'
 import ProtectedRoute from './pages/ProtectedRoute' // Import the new gatekeeper
+import { AuthProvider } from './pages/AuthContext' // Import the new AuthProvider
 import { DataProvider } from './pages/DataContext'
 
 function App() {
   return (
-    <DataProvider>
-      <Router>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route element={<ProtectedRoute />}>
-            <Route path="/" element={<Layout />}>
-              <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="logs" element={<TradeLogs />} />
-              <Route path="option-chain" element={<OptionChain />} />
+    <Router>
+      <AuthProvider>
+        <DataProvider>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route element={<ProtectedRoute />}>
+              <Route path="/" element={<Layout />}>
+                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route path="dashboard" element={<Dashboard />} />
+                <Route path="settings" element={<Settings />} />
+                <Route path="logs" element={<TradeLogs />} />
+                <Route path="option-chain" element={<OptionChain />} />
+              </Route>
             </Route>
-          </Route>
-        </Routes>
-      </Router>
-    </DataProvider>
+          </Routes>
+        </DataProvider>
+      </AuthProvider>
+    </Router>
   )
 }
 

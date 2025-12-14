@@ -2,7 +2,7 @@ import httpx
 import asyncio
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta, timezone
-from database import get_user_settings, get_user_tokens, log_signal
+from database import get_user_settings, get_user_tokens, log_signal, db
 from calc import find_atm_strike
 from auth import refresh_access_token
 from greek_signals import detect_signals
@@ -237,6 +237,31 @@ def calculate_change_from_baseline(current_greeks: Dict, baseline: Dict) -> Dict
             change[side][greek] = current_greeks[side].get(greek, 0) - baseline[side].get(greek, 0)
     return change
 
+async def get_daily_baseline(username: str, date_str: str) -> Optional[Dict]:
+    """Fetches the baseline for a specific user and date from the database."""
+    baseline_doc = await db.daily_baselines.find_one({"username": username, "date": date_str})
+    if baseline_doc:
+        print(f"💾 Found existing baseline in DB for {username} on {date_str}")
+        return baseline_doc.get("baseline_data")
+    return None
+
+async def save_daily_baseline(username: str, date_str: str, baseline_data: Dict):
+    """Saves or updates the baseline for a specific user and date in the database."""
+    print(f"💾 Saving baseline to DB for {username} on {date_str}")
+    await db.daily_baselines.update_one(
+        {"username": username, "date": date_str},
+        {"$set": {"baseline_data": baseline_data}},
+        upsert=True
+    )
+
+async def clear_daily_baseline(username: str, date_str: str):
+    """Clears the baseline for a specific user and date from the database."""
+    global baseline_greeks
+    baseline_greeks = None # Clear in-memory baseline
+    result = await db.daily_baselines.delete_one({"username": username, "date": date_str})
+    if result.deleted_count > 0:
+        print(f"🗑️ Cleared baseline from DB for {username} on {date_str}")
+
 async def polling_worker(manager):
     """Background worker that polls Upstox API every 5 seconds"""
     global latest_data, raw_option_chain, polling_active, should_poll, baseline_greeks
@@ -287,6 +312,12 @@ async def polling_worker(manager):
             # This prevents the redirect loop on the frontend.
             latest_data = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "aggregated_greeks": None,
+                "baseline_greeks": None,
+                "change_from_baseline": None,
+                "signals": [],
+                "option_count": 0,
+                "options": [],
                 "underlying_price": None,
                 "atm_strike": None,
                 "message": f"Authenticated as {current_user}. Waiting for first data poll..."
@@ -294,6 +325,13 @@ async def polling_worker(manager):
 
         
         try:
+            # On first poll for a user, try to load baseline from DB
+            if baseline_greeks is None:
+                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                db_baseline = await get_daily_baseline(current_user, today_str)
+                if db_baseline:
+                    baseline_greeks = db_baseline
+
             # Fetch option chain
             upstox_data = await fetch_option_chain(current_user)
             
@@ -319,10 +357,14 @@ async def polling_worker(manager):
                     # NEW: Use the updated aggregation logic (ATM + 10 OTM)
                     aggregated = aggregate_greeks_atm_otm(normalized_data)
 
-                    # NEW: Set baseline on the first successful fetch of the session
-                    if baseline_greeks is None:
+                    # Set baseline if it's not already set (from DB or previous poll)
+                    # Also capture if it's invalid (e.g., all zeros)
+                    is_baseline_invalid = not baseline_greeks or baseline_greeks.get("call", {}).get("delta") == 0
+                    if is_baseline_invalid and aggregated:
                         baseline_greeks = aggregated
                         print("📈 Baseline greeks captured for the day.")
+                        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                        await save_daily_baseline(current_user, today_str, baseline_greeks)
                     
                     # Detect signals
                     signals = await detect_signals(normalized_data, aggregated, current_user, signal_confirmation_state)
@@ -424,21 +466,30 @@ async def stop_polling():
 def enable_polling():
     """Enable polling - called after successful login"""
     global should_poll
-    # Reset data on new login to ensure no stale data is shown
-    global latest_data, baseline_greeks
+    global latest_data
     latest_data = None
-    baseline_greeks = None # Reset baseline for the new session
+    reset_baseline_greeks() # Clear in-memory baseline to force a reload from DB on next poll
     should_poll = True
     print("✅ Polling enabled - will start fetching data")
 
 
 def disable_polling():
     """Disable polling - called on logout"""
-    global should_poll, latest_data, baseline_greeks
+    global should_poll, latest_data
     should_poll = False
     latest_data = None  # Clear the data when polling is disabled
-    baseline_greeks = None # Clear baseline on logout
+    reset_baseline_greeks() # Clear in-memory baseline on logout
     print("🛑 Polling disabled - will stop fetching data")
+
+
+def reset_baseline_greeks():
+    """Manually reset the baseline greeks. The worker will clear it from the DB."""
+    global baseline_greeks
+    # This function is now simpler. It just clears the in-memory version.
+    # The polling worker will see it's None, capture a new one, and save it.
+    # The new API endpoint will handle DB clearing directly for immediate effect.
+    baseline_greeks = None
+    print("🔄 In-memory baseline greeks have been reset. A new baseline will be captured on the next poll.")
 
 
 def get_latest_data() -> Optional[Dict]:

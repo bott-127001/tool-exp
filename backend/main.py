@@ -15,7 +15,7 @@ load_dotenv()
 
 from auth import auth_router
 from database import init_db, get_user_settings, update_user_settings
-from data_fetcher import start_polling, stop_polling, get_latest_data, get_current_authenticated_user
+from data_fetcher import start_polling, stop_polling, get_latest_data, get_current_authenticated_user, clear_daily_baseline
 from greek_signals import detect_signals
 
 # For data export
@@ -161,6 +161,20 @@ async def get_current_user():
     """
     user = await get_current_authenticated_user()
     return JSONResponse(content={"user": user})
+
+
+@app.post("/api/reset-baseline")
+async def reset_baseline():
+    """
+    Manually clears the baseline greeks for the current user and the current day
+    from the database, forcing a recapture on the next poll.
+    """
+    user = await get_current_authenticated_user()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    await clear_daily_baseline(user, today_str)
+    return {"message": "Baseline greeks for today have been cleared. A new baseline will be captured on the next data poll."}
 
 
 @app.get("/api/settings/{user}")

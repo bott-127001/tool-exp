@@ -1,17 +1,16 @@
 import React from 'react';
 import { Link, Outlet, useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import { useData } from './DataContext';
+import { useAuth } from './AuthContext';
 
 function Layout() {
   const { connected } = useData();
+  const { logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
     try {
-      // Call the new, secure logout endpoint
-      await axios.post('/api/auth/logout');
-      localStorage.removeItem('currentUser');
+      await logout();
       navigate('/login');
     } catch (error) {
       console.error('Logout error:', error);

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { useCurrentUser } from './useCurrentUser'
+import { useAuth } from './AuthContext'
 
 function Settings() {
   const [settings, setSettings] = useState({
@@ -11,10 +10,9 @@ function Settings() {
     gamma_threshold: 0.01,
     consecutive_confirmations: 2
   })
-  const currentUser = useCurrentUser()
+  const { currentUser } = useAuth();
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
-  const navigate = useNavigate()
 
   useEffect(() => {
     // Since this is a protected route, we can safely assume currentUser will be available.
