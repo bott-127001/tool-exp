@@ -173,7 +173,7 @@ async def reset_baseline():
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    await clear_daily_baseline(user, today_str)
+    await clear_daily_baseline(user, today_str) # Add await here
     return {"message": "Baseline greeks for today have been cleared. A new baseline will be captured on the next data poll."}
 
 
