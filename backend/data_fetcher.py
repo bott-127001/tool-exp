@@ -39,8 +39,7 @@ raw_option_chain: Optional[Dict] = None
 baseline_greeks: Optional[Dict] = None # NEW: To store baseline greeks for the day
 polling_active = False
 should_poll = False  # Flag to control whether polling should actually fetch data
-connection_manager = None
-from main import manager # Import the global manager instance
+from ws_manager import manager # Import the shared manager instance
 # Upstox API endpoints
 UPSTOX_BASE_URL = "https://api.upstox.com/v2"
 UPSTOX_OPTION_CHAIN_URL = f"{UPSTOX_BASE_URL}/option/chain"

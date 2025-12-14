@@ -15,50 +15,13 @@ load_dotenv()
 
 from auth import auth_router
 from database import init_db, get_user_settings, update_user_settings
+from ws_manager import manager # Import the shared manager instance
 from data_fetcher import start_polling, stop_polling, get_latest_data, get_current_authenticated_user, clear_daily_baseline
 from greek_signals import detect_signals
 
 # For data export
 from fastapi.responses import StreamingResponse
 import io
-
-# WebSocket connection manager
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-    
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-    
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-    
-    async def broadcast(self, data: dict):
-        disconnected = []
-        for connection in self.active_connections[:]:  # Use slice copy to avoid modification during iteration
-            try:
-                # Check if connection is still open before sending
-                await connection.send_json(data)
-            except (WebSocketDisconnect, RuntimeError, ConnectionError) as e:
-                # These are expected when connection is closed
-                disconnected.append(connection)
-            except Exception as e:
-                # Only log unexpected errors
-                error_msg = str(e).lower()
-                if "closed" not in error_msg and "disconnect" not in error_msg and "send" not in error_msg:
-                    print(f"❌ WebSocket send error: {e}")
-                disconnected.append(connection)
-        
-        # Remove disconnected connections
-        for conn in disconnected:
-            try:
-                self.disconnect(conn)
-            except:
-                pass
-
-
-manager = ConnectionManager()
 
 
 @asynccontextmanager
