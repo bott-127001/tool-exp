@@ -227,13 +227,18 @@ def normalize_option_chain(upstox_data: Dict) -> Dict:
 
 def calculate_change_from_baseline(current_greeks: Dict, baseline: Dict) -> Dict:
     """NEW: Calculate the change between current and baseline greeks."""
-    if not baseline:
-        return {"call": {}, "put": {}} # No baseline to compare against
+    # Initialize with zeros to ensure structure exists for the signal detector
+    change = {
+        "call": {"delta": 0, "vega": 0, "theta": 0, "gamma": 0},
+        "put": {"delta": 0, "vega": 0, "theta": 0, "gamma": 0}
+    }
     
-    change = {"call": {}, "put": {}}
+    if not baseline or not current_greeks:
+        return change
+    
     for side in ["call", "put"]:
         for greek in ["delta", "vega", "theta", "gamma"]:
-            change[side][greek] = current_greeks[side].get(greek, 0) - baseline[side].get(greek, 0)
+            change[side][greek] = current_greeks.get(side, {}).get(greek, 0) - baseline.get(side, {}).get(greek, 0)
     return change
 
 async def get_daily_baseline(username: str, date_str: str) -> Optional[Dict]:
@@ -384,8 +389,12 @@ async def polling_worker():
                         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                         await save_daily_baseline(current_user, today_str, baseline_greeks)
                     
-                    # Detect signals
-                    signals = await detect_signals(normalized_data, aggregated, current_user, signal_confirmation_state)
+                    # NEW: Calculate change from baseline BEFORE detecting signals
+                    change_from_baseline = calculate_change_from_baseline(aggregated, baseline_greeks)
+
+                    # Detect signals - PASS CHANGE INSTEAD OF ABSOLUTE VALUES
+                    # This ensures we are detecting the "Drift" (Signature) and not just static values.
+                    signals = await detect_signals(normalized_data, change_from_baseline, current_user, signal_confirmation_state)
 
                     # Post-process signals for logging based on confirmation count
                     settings = await get_user_settings(current_user)
@@ -419,9 +428,6 @@ async def polling_worker():
                                 )
                                 # Reset counter after logging
                                 signal_confirmation_state[current_user][position] = 0
-                    
-                    # NEW: Calculate change from baseline
-                    change_from_baseline = calculate_change_from_baseline(aggregated, baseline_greeks)
                     
                     # Combine all data
                     latest_data = {
