@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import asyncio
 from typing import Dict, List
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -208,6 +208,18 @@ async def export_data():
     # Seek to the beginning of the stream
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=market_data_log.csv"})
+
+
+@app.delete("/api/clear-data")
+async def clear_market_data():
+    """Clears all collected market data logs from the database."""
+    user = await get_current_authenticated_user()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    from database import market_data_log_collection
+    result = await market_data_log_collection.delete_many({})
+    return {"message": f"Successfully deleted {result.deleted_count} records."}
 
 
 # --- Static Files and Catch-all ---

@@ -271,26 +271,45 @@ async def polling_worker():
     # This is robust against multi-worker deployments.
     signal_confirmation_state: Dict[str, Dict[str, int]] = {}
     
-    print("Polling worker started. Waiting for explicit login to start polling...")
+    print("Polling worker started. Operating autonomously during market hours (09:15 - 15:30 IST).")
     
     # Main polling loop - wait for explicit enable via login
     while polling_active:
-        # Only poll if should_poll is True AND we have an authenticated user
-        if not should_poll:
-            # Polling disabled - wait and check again
-            await asyncio.sleep(1)
+        # Time Check: 09:15 to 15:30 IST
+        now_utc = datetime.now(timezone.utc)
+        now_ist = now_utc + timedelta(hours=5, minutes=30)
+        
+        # Check for weekends (Saturday=5, Sunday=6)
+        if now_ist.weekday() >= 5:
+            if current_user:
+                print(f"📅 Weekend ({now_ist.strftime('%A')}). Stopping polling.")
+                current_user = None
+                latest_data = None
+            await asyncio.sleep(3600) # Check every hour on weekends to save resources
+            continue
+
+        current_time = now_ist.time()
+        start_time = datetime.strptime("09:15", "%H:%M").time()
+        end_time = datetime.strptime("15:30", "%H:%M").time()
+
+        if not (start_time <= current_time <= end_time):
+            # Outside market hours
+            if current_user:
+                print(f"🕒 Market closed ({current_time.strftime('%H:%M')}). Stopping polling.")
+                current_user = None # Reset user session
+                latest_data = None
+            await asyncio.sleep(60) # Check every minute
             continue
         
         # Find authenticated user (first available)
         found_user = None
         for user in ["samarth", "prajwal"]:
             tokens = await get_user_tokens(user)
-            if tokens:
-                import time
-                # Check if token exists and is not null
-                if tokens.get("access_token") and tokens["token_expires_at"] > time.time():
-                    found_user = user
-                    break
+            # Check if token exists. We allow expired tokens here because fetch_option_chain
+            # has built-in logic to refresh them.
+            if tokens and tokens.get("access_token"):
+                found_user = user
+                break
         
         if not found_user:
             # No authenticated user found - reset and wait
@@ -299,7 +318,7 @@ async def polling_worker():
                 current_user = None
                 # Disable polling when user logs out
                 # should_poll = False # Let logout handle this
-            await asyncio.sleep(2)
+            await asyncio.sleep(5)
             continue
         
         # We have an authenticated user and polling is enabled
