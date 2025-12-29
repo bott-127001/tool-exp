@@ -162,8 +162,8 @@ def determine_market_state(rv_current: Optional[float], rv_open_norm: Optional[f
     # Conditions:
     # - RV_current >> RV_open_norm (much greater)
     # - IV > IV_VWAP
-    # Or if RV_current > RV_open_norm and IV > IV_VWAP (volatility already released)
-    if (rv_current > rv_open_norm * 1.5 or (rv_current > rv_open_norm and iv_atm > iv_vwap)):
+    # Both conditions must be true (AND)
+    if rv_current > rv_open_norm * 1.5 and iv_atm > iv_vwap:
         return ("EXPANSION", {
             "reason": "Volatility already released and options repriced",
             "action": "DO NOT ENTER FRESH - Manage existing trades only",
