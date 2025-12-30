@@ -44,7 +44,17 @@ async def init_db():
             "vega_threshold": 0.10,
             "theta_threshold": 0.02,
             "gamma_threshold": 0.01,
-            "consecutive_confirmations": 2
+            "consecutive_confirmations": 2,
+            # Volatility-permission thresholds
+            "vol_expansion_rv_multiplier": 1.5,
+            # Direction & Asymmetry thresholds
+            "dir_gap_acceptance_threshold": 0.65,
+            "dir_acceptance_neutral_threshold": 0.5,
+            "dir_rea_bull_threshold": 0.3,
+            "dir_rea_bear_threshold": -0.3,
+            "dir_rea_neutral_abs_threshold": 0.3,
+            "dir_de_directional_threshold": 0.5,
+            "dir_de_neutral_threshold": 0.3,
         }
         await settings_collection.update_one(
             {"username": user},
@@ -86,6 +96,14 @@ async def update_user_settings(username: str, settings: Dict) -> Optional[Dict]:
         "theta_threshold": settings.get("theta_threshold"),
         "gamma_threshold": settings.get("gamma_threshold"),
         "consecutive_confirmations": settings.get("consecutive_confirmations"),
+        "vol_expansion_rv_multiplier": settings.get("vol_expansion_rv_multiplier"),
+        "dir_gap_acceptance_threshold": settings.get("dir_gap_acceptance_threshold"),
+        "dir_acceptance_neutral_threshold": settings.get("dir_acceptance_neutral_threshold"),
+        "dir_rea_bull_threshold": settings.get("dir_rea_bull_threshold"),
+        "dir_rea_bear_threshold": settings.get("dir_rea_bear_threshold"),
+        "dir_rea_neutral_abs_threshold": settings.get("dir_rea_neutral_abs_threshold"),
+        "dir_de_directional_threshold": settings.get("dir_de_directional_threshold"),
+        "dir_de_neutral_threshold": settings.get("dir_de_neutral_threshold"),
     }
     # Filter out None values
     update_data = {k: v for k, v in update_data.items() if v is not None}

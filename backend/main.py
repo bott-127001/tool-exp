@@ -152,7 +152,17 @@ async def get_settings(user: str):
             "vega_threshold": 0.10,
             "theta_threshold": 0.02,
             "gamma_threshold": 0.01,
-            "consecutive_confirmations": 2
+            "consecutive_confirmations": 2,
+            # Volatility-permission thresholds
+            "vol_expansion_rv_multiplier": 1.5,
+            # Direction & Asymmetry thresholds
+            "dir_gap_acceptance_threshold": 0.65,
+            "dir_acceptance_neutral_threshold": 0.5,
+            "dir_rea_bull_threshold": 0.3,
+            "dir_rea_bear_threshold": -0.3,
+            "dir_rea_neutral_abs_threshold": 0.3,
+            "dir_de_directional_threshold": 0.5,
+            "dir_de_neutral_threshold": 0.3,
         }
     
     # Convert ObjectId to string to avoid JSON serialization error

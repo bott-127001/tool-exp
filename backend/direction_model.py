@@ -21,6 +21,8 @@ def calculate_gap_and_acceptance(
     previous_day_range: Optional[float],
     intraday_prices: List[Dict],
     session_start: datetime,
+    gap_acceptance_threshold: float = 0.65,
+    acceptance_neutral_threshold: float = 0.5,
 ) -> Dict:
     """
     Opening Location + Gap Acceptance
@@ -84,12 +86,12 @@ def calculate_gap_and_acceptance(
         acceptance_ratio = time_in_gap_direction / total_seconds
         result["acceptance_ratio"] = acceptance_ratio
 
-        # Bias logic from spec
-        if gap > 0 and acceptance_ratio > 0.65:
+        # Bias logic from spec (configurable thresholds)
+        if gap > 0 and acceptance_ratio > gap_acceptance_threshold:
             result["bias"] = "BULLISH"
-        elif gap < 0 and acceptance_ratio > 0.65:
+        elif gap < 0 and acceptance_ratio > gap_acceptance_threshold:
             result["bias"] = "BEARISH"
-        elif acceptance_ratio < 0.5:
+        elif acceptance_ratio < acceptance_neutral_threshold:
             result["bias"] = "NEUTRAL"
         else:
             result["bias"] = "NEUTRAL"
@@ -186,6 +188,11 @@ def determine_directional_state(
     opening_bias: str,
     rea_value: Optional[float],
     de_value: Optional[float],
+    rea_bull_threshold: float = 0.3,
+    rea_bear_threshold: float = -0.3,
+    rea_neutral_abs_threshold: float = 0.3,
+    de_directional_threshold: float = 0.5,
+    de_neutral_threshold: float = 0.3,
 ) -> Tuple[str, Dict]:
     """
     Combine Opening Acceptance bias, REA, and DE into a directional state.
@@ -206,18 +213,18 @@ def determine_directional_state(
         return "NEUTRAL", info
 
     # Bullish directional day
-    if opening_bias == "BULLISH" and rea_value > 0.3 and de_value > 0.5:
-        info["reason"] = "Opening acceptance bullish, REA > 0.3, DE > 0.5"
+    if opening_bias == "BULLISH" and rea_value > rea_bull_threshold and de_value > de_directional_threshold:
+        info["reason"] = "Opening acceptance bullish, REA > bull threshold, DE > directional threshold"
         return "DIRECTIONAL_BULL", info
 
     # Bearish directional day
-    if opening_bias == "BEARISH" and rea_value < -0.3 and de_value > 0.5:
-        info["reason"] = "Opening acceptance bearish, REA < -0.3, DE > 0.5"
+    if opening_bias == "BEARISH" and rea_value < rea_bear_threshold and de_value > de_directional_threshold:
+        info["reason"] = "Opening acceptance bearish, REA < bear threshold, DE > directional threshold"
         return "DIRECTIONAL_BEAR", info
 
     # Neutral / no edge
-    if de_value < 0.3 and abs(rea_value) < 0.3:
-        info["reason"] = "DE < 0.3 and REA near zero → Neutral / no edge"
+    if de_value < de_neutral_threshold and abs(rea_value) < rea_neutral_abs_threshold:
+        info["reason"] = "DE < neutral threshold and REA near zero → Neutral / no edge"
         return "NEUTRAL", info
 
     info["reason"] = "Mixed conditions → treat as NEUTRAL"
@@ -227,6 +234,7 @@ def determine_directional_state(
 def calculate_direction_metrics(
     price_history: List[Dict],
     market_open_time: Optional[datetime],
+    settings: Optional[Dict] = None,
 ) -> Dict:
     """
     High-level entry point to compute all Direction & Asymmetry metrics.
@@ -248,6 +256,16 @@ def calculate_direction_metrics(
             "directional_info": {"reason": "Insufficient intraday data"},
         }
 
+    # Defaults for thresholds
+    settings = settings or {}
+    gap_acceptance_threshold = settings.get("dir_gap_acceptance_threshold", 0.65)
+    acceptance_neutral_threshold = settings.get("dir_acceptance_neutral_threshold", 0.5)
+    rea_bull_threshold = settings.get("dir_rea_bull_threshold", 0.3)
+    rea_bear_threshold = settings.get("dir_rea_bear_threshold", -0.3)
+    rea_neutral_abs_threshold = settings.get("dir_rea_neutral_abs_threshold", 0.3)
+    de_directional_threshold = settings.get("dir_de_directional_threshold", 0.5)
+    de_neutral_threshold = settings.get("dir_de_neutral_threshold", 0.3)
+
     # Ensure history is sorted by time
     history_sorted = sorted(price_history, key=lambda p: p["timestamp"])
     intraday_prices = history_sorted
@@ -263,6 +281,8 @@ def calculate_direction_metrics(
         previous_day_range=None,
         intraday_prices=intraday_prices,
         session_start=market_open_time,
+        gap_acceptance_threshold=gap_acceptance_threshold,
+        acceptance_neutral_threshold=acceptance_neutral_threshold,
     )
 
     rea_data = calculate_rea(
@@ -281,6 +301,11 @@ def calculate_direction_metrics(
         opening_bias=opening.get("bias", "NEUTRAL"),
         rea_value=rea_value,
         de_value=de_value,
+        rea_bull_threshold=rea_bull_threshold,
+        rea_bear_threshold=rea_bear_threshold,
+        rea_neutral_abs_threshold=rea_neutral_abs_threshold,
+        de_directional_threshold=de_directional_threshold,
+        de_neutral_threshold=de_neutral_threshold,
     )
 
     return {

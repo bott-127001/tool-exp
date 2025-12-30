@@ -489,6 +489,11 @@ async def polling_worker():
                     price_15min_ago = get_price_15min_ago(current_time_utc)
                     # Use full 15-minute micro-move history for RV(current)
                     price_series_15min = [p["price"] for p in price_history]
+
+                    # Load user settings (for thresholds)
+                    settings = await get_user_settings(current_user)
+                    settings = settings or {}
+
                     volatility_metrics = calculate_volatility_metrics(
                         current_price=current_price,
                         price_15min_ago=price_15min_ago,
@@ -499,13 +504,15 @@ async def polling_worker():
                         options=normalized_data["options"],
                         atm_strike=normalized_data["atm_strike"],
                         underlying_price=current_price,
-                        rv_current_prev=rv_current_prev
+                        rv_current_prev=rv_current_prev,
+                        expansion_rv_multiplier=settings.get("vol_expansion_rv_multiplier", 1.5),
                     )
 
                     # Calculate Direction & Asymmetry metrics (price-based)
                     direction_metrics = calculate_direction_metrics(
                         price_history=price_history,
                         market_open_time=market_open_time,
+                        settings=settings,
                     )
 
                     # Detect signals - PASS CHANGE INSTEAD OF ABSOLUTE VALUES

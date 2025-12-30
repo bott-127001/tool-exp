@@ -154,9 +154,14 @@ def calculate_iv_vwap(options: List[Dict], atm_strike: float) -> Optional[float]
     return total_iv_volume / total_volume
 
 
-def determine_market_state(rv_current: Optional[float], rv_open_norm: Optional[float],
-                           rv_current_prev: Optional[float], iv_atm: Optional[float],
-                           iv_vwap: Optional[float]) -> Tuple[str, Dict]:
+def determine_market_state(
+    rv_current: Optional[float],
+    rv_open_norm: Optional[float],
+    rv_current_prev: Optional[float],
+    iv_atm: Optional[float],
+    iv_vwap: Optional[float],
+    expansion_rv_multiplier: float = 1.5,
+) -> Tuple[str, Dict]:
     """
     Determine market state: CONTRACTION, TRANSITION, or EXPANSION
     
@@ -209,7 +214,7 @@ def determine_market_state(rv_current: Optional[float], rv_open_norm: Optional[f
     # - RV_current >> RV_open_norm (much greater)
     # - IV > IV_VWAP
     # Both conditions must be true (AND)
-    if rv_current > rv_open_norm * 1.5 and iv_atm > iv_vwap:
+    if rv_current > rv_open_norm * expansion_rv_multiplier and iv_atm > iv_vwap:
         return ("EXPANSION", {
             "reason": "Volatility already released and options repriced",
             "action": "DO NOT ENTER FRESH - Manage existing trades only",
@@ -252,7 +257,8 @@ def calculate_volatility_metrics(
     options: List[Dict],
     atm_strike: float,
     underlying_price: float,
-    rv_current_prev: Optional[float] = None
+    rv_current_prev: Optional[float] = None,
+    expansion_rv_multiplier: float = 1.5,
 ) -> Dict:
     """
     Calculate all volatility metrics and determine market state
@@ -267,7 +273,7 @@ def calculate_volatility_metrics(
     
     # Determine market state
     state_name, state_info = determine_market_state(
-        rv_current, rv_open_norm, rv_current_prev, iv_atm, iv_vwap
+        rv_current, rv_open_norm, rv_current_prev, iv_atm, iv_vwap, expansion_rv_multiplier
     )
     
     return {

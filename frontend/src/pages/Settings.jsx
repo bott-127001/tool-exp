@@ -8,7 +8,15 @@ function Settings() {
     vega_threshold: 0.10,
     theta_threshold: 0.02,
     gamma_threshold: 0.01,
-    consecutive_confirmations: 2
+    consecutive_confirmations: 2,
+    vol_expansion_rv_multiplier: 1.5,
+    dir_gap_acceptance_threshold: 0.65,
+    dir_acceptance_neutral_threshold: 0.5,
+    dir_rea_bull_threshold: 0.3,
+    dir_rea_bear_threshold: -0.3,
+    dir_rea_neutral_abs_threshold: 0.3,
+    dir_de_directional_threshold: 0.5,
+    dir_de_neutral_threshold: 0.3
   })
   const { currentUser } = useAuth();
   const [saving, setSaving] = useState(false)
@@ -186,6 +194,127 @@ function Settings() {
               onChange={handleChange}
               step="1"
               min="1"
+              required
+            />
+          </div>
+
+          <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
+
+          <h3>Volatility-Permission Thresholds</h3>
+
+          <div className="form-group">
+            <label htmlFor="vol_expansion_rv_multiplier">Expansion RV Multiplier</label>
+            <input
+              type="number"
+              id="vol_expansion_rv_multiplier"
+              name="vol_expansion_rv_multiplier"
+              value={settings.vol_expansion_rv_multiplier}
+              onChange={handleChange}
+              step="0.1"
+              min="1"
+              required
+            />
+          </div>
+
+          <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
+
+          <h3>Direction & Asymmetry Thresholds</h3>
+
+          <div className="form-group">
+            <label htmlFor="dir_gap_acceptance_threshold">Gap Acceptance Threshold</label>
+            <input
+              type="number"
+              id="dir_gap_acceptance_threshold"
+              name="dir_gap_acceptance_threshold"
+              value={settings.dir_gap_acceptance_threshold}
+              onChange={handleChange}
+              step="0.01"
+              min="0"
+              max="1"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="dir_acceptance_neutral_threshold">Acceptance Neutral Threshold</label>
+            <input
+              type="number"
+              id="dir_acceptance_neutral_threshold"
+              name="dir_acceptance_neutral_threshold"
+              value={settings.dir_acceptance_neutral_threshold}
+              onChange={handleChange}
+              step="0.01"
+              min="0"
+              max="1"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="dir_rea_bull_threshold">REA Bull Threshold</label>
+            <input
+              type="number"
+              id="dir_rea_bull_threshold"
+              name="dir_rea_bull_threshold"
+              value={settings.dir_rea_bull_threshold}
+              onChange={handleChange}
+              step="0.01"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="dir_rea_bear_threshold">REA Bear Threshold</label>
+            <input
+              type="number"
+              id="dir_rea_bear_threshold"
+              name="dir_rea_bear_threshold"
+              value={settings.dir_rea_bear_threshold}
+              onChange={handleChange}
+              step="0.01"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="dir_rea_neutral_abs_threshold">REA Neutral |value| Threshold</label>
+            <input
+              type="number"
+              id="dir_rea_neutral_abs_threshold"
+              name="dir_rea_neutral_abs_threshold"
+              value={settings.dir_rea_neutral_abs_threshold}
+              onChange={handleChange}
+              step="0.01"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="dir_de_directional_threshold">DE Directional Threshold</label>
+            <input
+              type="number"
+              id="dir_de_directional_threshold"
+              name="dir_de_directional_threshold"
+              value={settings.dir_de_directional_threshold}
+              onChange={handleChange}
+              step="0.01"
+              min="0"
+              max="1"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="dir_de_neutral_threshold">DE Neutral Threshold</label>
+            <input
+              type="number"
+              id="dir_de_neutral_threshold"
+              name="dir_de_neutral_threshold"
+              value={settings.dir_de_neutral_threshold}
+              onChange={handleChange}
+              step="0.01"
+              min="0"
+              max="1"
               required
             />
           </div>

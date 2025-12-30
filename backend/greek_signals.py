@@ -86,7 +86,7 @@ async def detect_signals(normalized_data: Dict, aggregated_greeks: Dict, usernam
             "vega_threshold": 0.10,
             "theta_threshold": 0.02,
             "gamma_threshold": 0.01,
-            "consecutive_confirmations": 2
+            "consecutive_confirmations": 2,
         }
     
     # Check all positions
