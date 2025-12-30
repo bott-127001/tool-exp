@@ -49,43 +49,47 @@ function VolatilityPermission() {
     <>
       <div className="card">
         <h2>Volatility-Permission Model</h2>
-        {hasData && volatilityData.market_state ? (
-          <>
-            <div style={{
-              padding: '20px',
-              marginBottom: '20px',
-              borderRadius: '8px',
-              backgroundColor: getStateColor(market_state) + '20',
-              border: `2px solid ${getStateColor(market_state)}`,
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: '48px', marginBottom: '10px' }}>
-                {getStateIcon(market_state)}
-              </div>
-              <h2 style={{ 
-                color: getStateColor(market_state),
-                margin: '10px 0',
-                fontSize: '32px'
-              }}>
-                {market_state}
-              </h2>
-              <p style={{ 
-                fontSize: '18px',
-                fontWeight: 'bold',
-                margin: '10px 0',
-                color: getStateColor(market_state)
-              }}>
-                {state_info?.action || 'No action specified'}
-              </p>
-              <p style={{ 
-                fontSize: '14px',
-                color: '#666',
-                marginTop: '10px'
-              }}>
-                {state_info?.reason || 'No reason provided'}
-              </p>
-            </div>
+      </div>
 
+      {hasData && volatilityData.market_state ? (
+        <>
+          <div className="card" style={{
+            padding: '20px',
+            marginTop: '20px',
+            borderRadius: '8px',
+            backgroundColor: getStateColor(market_state) + '20',
+            border: `2px solid ${getStateColor(market_state)}`,
+            textAlign: 'center'
+          }}>
+            <div style={{ fontSize: '48px', marginBottom: '10px' }}>
+              {getStateIcon(market_state)}
+            </div>
+            <h2 style={{ 
+              color: getStateColor(market_state),
+              margin: '10px 0',
+              fontSize: '32px'
+            }}>
+              {market_state}
+            </h2>
+            <p style={{ 
+              fontSize: '18px',
+              fontWeight: 'bold',
+              margin: '10px 0',
+              color: getStateColor(market_state)
+            }}>
+              {state_info?.action || 'No action specified'}
+            </p>
+            <p style={{ 
+              fontSize: '14px',
+              color: '#666',
+              marginTop: '10px'
+            }}>
+              {state_info?.reason || 'No reason provided'}
+            </p>
+          </div>
+
+          <div className="card" style={{ marginTop: '20px' }}>
+            <h3>Volatility Metrics</h3>
             <div className="table-responsive-wrapper">
               <table>
                 <thead>
@@ -119,66 +123,68 @@ function VolatilityPermission() {
                 </tbody>
               </table>
             </div>
+          </div>
 
-            <div style={{ marginTop: '20px' }}>
-              <h3>Price Information</h3>
-              <div className="table-responsive-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Price Type</th>
-                      <th>Value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td><strong>Current Price</strong></td>
-                      <td>{current_price !== null && current_price !== undefined ? current_price.toFixed(2) : 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <td><strong>Open Price</strong></td>
-                      <td>{open_price !== null && open_price !== undefined ? open_price.toFixed(2) : 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <td><strong>Price 15min Ago</strong></td>
-                      <td>{price_15min_ago !== null && price_15min_ago !== undefined ? price_15min_ago.toFixed(2) : 'N/A'}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+          <div className="card" style={{ marginTop: '20px' }}>
+            <h3>Price Information</h3>
+            <div className="table-responsive-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Price Type</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Current Price</strong></td>
+                    <td>{current_price !== null && current_price !== undefined ? current_price.toFixed(2) : 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Open Price</strong></td>
+                    <td>{open_price !== null && open_price !== undefined ? open_price.toFixed(2) : 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Price 15min Ago</strong></td>
+                    <td>{price_15min_ago !== null && price_15min_ago !== undefined ? price_15min_ago.toFixed(2) : 'N/A'}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
+          </div>
 
-            <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
-              <h3>Market State Conditions</h3>
-              <div style={{ fontSize: '14px', lineHeight: '1.8' }}>
-                <p><strong>🔴 CONTRACTION (NO TRADE):</strong></p>
-                <ul style={{ marginLeft: '20px', marginBottom: '15px' }}>
-                  <li>RV(current) &lt; RV(open-normalized)</li>
-                  <li>IV ≤ IV-VWAP</li>
-                  <li>Market moving slower than average, option buyers bleed</li>
-                </ul>
+          <div className="card" style={{ marginTop: '20px', padding: '15px' }}>
+            <h3>Market State Conditions</h3>
+            <div style={{ fontSize: '14px', lineHeight: '1.8' }}>
+              <p><strong>🔴 CONTRACTION (NO TRADE):</strong></p>
+              <ul style={{ marginLeft: '20px', marginBottom: '15px' }}>
+                <li>RV(current) &lt; RV(open-normalized)</li>
+                <li>IV ≤ IV-VWAP</li>
+                <li>Market moving slower than average, option buyers bleed</li>
+              </ul>
 
-                <p><strong>🟡 TRANSITION (VALID ENTRY ZONE):</strong></p>
-                <ul style={{ marginLeft: '20px', marginBottom: '15px' }}>
-                  <li>RV(current) &gt; RV(open-normalized)</li>
-                  <li>RV(current) is accelerating (increasing)</li>
-                  <li>IV ≤ IV-VWAP</li>
-                  <li>Volatility accelerating but IV not repriced yet - BEST TIME TO BUY</li>
-                </ul>
+              <p><strong>🟡 TRANSITION (VALID ENTRY ZONE):</strong></p>
+              <ul style={{ marginLeft: '20px', marginBottom: '15px' }}>
+                <li>RV(current) &gt; RV(open-normalized)</li>
+                <li>RV(current) is accelerating (increasing)</li>
+                <li>IV ≤ IV-VWAP</li>
+                <li>Volatility accelerating but IV not repriced yet - BEST TIME TO BUY</li>
+              </ul>
 
-                <p><strong>🟢 EXPANSION (DO NOT ENTER FRESH):</strong></p>
-                <ul style={{ marginLeft: '20px' }}>
-                  <li>RV(current) &gt;&gt; RV(open-normalized)</li>
-                  <li>IV &gt; IV-VWAP</li>
-                  <li>Volatility already released, options repriced - Manage existing trades only</li>
-                </ul>
-              </div>
+              <p><strong>🟢 EXPANSION (DO NOT ENTER FRESH):</strong></p>
+              <ul style={{ marginLeft: '20px' }}>
+                <li>RV(current) &gt;&gt; RV(open-normalized)</li>
+                <li>IV &gt; IV-VWAP</li>
+                <li>Volatility already released, options repriced - Manage existing trades only</li>
+              </ul>
             </div>
-          </>
-        ) : (
+          </div>
+        </>
+      ) : (
+        <div className="card" style={{ marginTop: '20px' }}>
           <p>{data.message || "Waiting for volatility data... Polling will start automatically."}</p>
-        )}
-      </div>
+        </div>
+      )}
     </>
   )
 }
