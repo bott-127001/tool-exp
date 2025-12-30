@@ -7,14 +7,26 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 
 
-def calculate_rv_current(current_price: float, price_15min_ago: Optional[float]) -> Optional[float]:
+def calculate_rv_current(price_series_15min: Optional[List[float]]) -> Optional[float]:
     """
-    Calculate RV(current) - 15-minute realized volatility
-    RV_current(t) = |Price_t - Price_{t-15min}|
+    Calculate RV(current) - 15-minute realized volatility using micro-moves.
+
+    Within the last 15 minutes of prices, RV_current(t) is defined as:
+
+        RV_current(t) = Σ |Price_i − Price_(i−1)|
+
+    This captures speed, activity, and urgency instead of just net drift.
     """
-    if price_15min_ago is None:
+    if not price_series_15min or len(price_series_15min) < 2:
         return None
-    return abs(current_price - price_15min_ago)
+
+    rv = 0.0
+    prev_price = price_series_15min[0]
+    for price in price_series_15min[1:]:
+        rv += abs(price - prev_price)
+        prev_price = price
+
+    return rv
 
 
 def calculate_rv_open_normalized(current_price: float, open_price: float, 
@@ -43,58 +55,92 @@ def calculate_rv_open_normalized(current_price: float, open_price: float,
     return rv_open_norm
 
 
-def get_atm_iv(options: List[Dict], atm_strike: float, underlying_price: float) -> Optional[float]:
+def _get_atm_cluster_options(options: List[Dict], atm_strike: float) -> List[Dict]:
     """
-    Get IV (ATM) - current implied volatility for ATM option
-    Takes ATM (or nearest ITM) option IV from option chain
+    Build the strict ATM IV cluster:
+      - ATM CE
+      - ATM PE
+      - ATM-1 strike CE
+      - ATM-1 strike PE
+      - ATM+1 strike CE
+      - ATM+1 strike PE
+
+    We infer ATM±1 by walking the sorted unique strikes around the given ATM strike.
     """
     if not options:
-        return None
-    
-    # Find ATM option (prefer ITM if available)
-    atm_options = []
+        return []
+
+    # Collect unique strikes and sort them
+    strikes = sorted({opt.get("strike") for opt in options if opt.get("strike") is not None})
+    if not strikes:
+        return []
+
+    # Find the exact ATM strike index
+    try:
+        atm_index = strikes.index(atm_strike)
+    except ValueError:
+        # If the provided ATM strike isn't in the list, find the nearest strike
+        closest_strike = min(strikes, key=lambda s: abs(s - atm_strike))
+        atm_index = strikes.index(closest_strike)
+
+    cluster_strikes: List[float] = []
+    # ATM-1
+    if atm_index - 1 >= 0:
+        cluster_strikes.append(strikes[atm_index - 1])
+    # ATM
+    cluster_strikes.append(strikes[atm_index])
+    # ATM+1
+    if atm_index + 1 < len(strikes):
+        cluster_strikes.append(strikes[atm_index + 1])
+
+    cluster_strike_set = set(cluster_strikes)
+
+    # Filter options for these strikes and for CE/PE only
+    cluster_options: List[Dict] = []
     for opt in options:
-        if opt.get("strike") == atm_strike:
-            atm_options.append(opt)
-    
-    if not atm_options:
-        # Find nearest strike to ATM
-        min_diff = float('inf')
-        nearest_opt = None
-        for opt in options:
-            diff = abs(opt.get("strike", 0) - atm_strike)
-            if diff < min_diff:
-                min_diff = diff
-                nearest_opt = opt
-        
-        if nearest_opt:
-            return nearest_opt.get("iv")
+        strike = opt.get("strike")
+        opt_type = opt.get("type")
+        if strike in cluster_strike_set and opt_type in ("CE", "PE"):
+            cluster_options.append(opt)
+
+    return cluster_options
+
+
+def get_iv_cluster(options: List[Dict], atm_strike: float) -> Optional[float]:
+    """
+    Get IV (ATM-cluster) as the simple average IV of the strict 6-option cluster:
+      ATM CE/PE and ATM±1 strike CE/PE.
+    """
+    cluster_options = _get_atm_cluster_options(options, atm_strike)
+    if not cluster_options:
         return None
-    
-    # Prefer ITM option if available
-    # For calls: ITM means strike < underlying, for puts: strike > underlying
-    # But we'll just take the first one with IV > 0
-    for opt in atm_options:
-        iv = opt.get("iv")
-        if iv and iv > 0:
-            return iv
-    
-    # If no IV found, return None
-    return None
+
+    iv_values = [
+        opt.get("iv")
+        for opt in cluster_options
+        if opt.get("iv") is not None and opt.get("iv") > 0
+    ]
+
+    if not iv_values:
+        return None
+
+    return sum(iv_values) / len(iv_values)
 
 
-def calculate_iv_vwap(options: List[Dict]) -> Optional[float]:
+def calculate_iv_vwap(options: List[Dict], atm_strike: float) -> Optional[float]:
     """
-    Calculate IV-VWAP - fair volatility price for the day
-    IV_VWAP(t) = Σ(IV_i * Volume_i) / Σ(Volume_i)
+    Calculate IV-VWAP over the strict ATM IV cluster only.
+
+    IV_VWAP(t) = Σ(IV_i × Volume_i) / Σ Volume_i
     """
-    if not options:
+    cluster_options = _get_atm_cluster_options(options, atm_strike)
+    if not cluster_options:
         return None
     
     total_iv_volume = 0.0
     total_volume = 0.0
     
-    for opt in options:
+    for opt in cluster_options:
         iv = opt.get("iv", 0)
         volume = opt.get("volume", 0)
         
@@ -199,6 +245,7 @@ def determine_market_state(rv_current: Optional[float], rv_open_norm: Optional[f
 def calculate_volatility_metrics(
     current_price: float,
     price_15min_ago: Optional[float],
+    price_series_15min: Optional[List[float]],
     open_price: Optional[float],
     market_open_time: datetime,
     current_time: datetime,
@@ -213,10 +260,10 @@ def calculate_volatility_metrics(
     Returns a dictionary with all calculated values and market state
     """
     # Calculate metrics
-    rv_current = calculate_rv_current(current_price, price_15min_ago)
+    rv_current = calculate_rv_current(price_series_15min)
     rv_open_norm = calculate_rv_open_normalized(current_price, open_price, market_open_time, current_time)
-    iv_atm = get_atm_iv(options, atm_strike, underlying_price)
-    iv_vwap = calculate_iv_vwap(options)
+    iv_atm = get_iv_cluster(options, atm_strike)
+    iv_vwap = calculate_iv_vwap(options, atm_strike)
     
     # Determine market state
     state_name, state_info = determine_market_state(

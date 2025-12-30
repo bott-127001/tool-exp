@@ -111,7 +111,7 @@ function VolatilityPermission() {
                     <td>Day's average movement speed - normalized by time</td>
                   </tr>
                   <tr>
-                    <td><strong>IV (ATM)</strong></td>
+                    <td><strong>IV (ATM-cluster)</strong></td>
                     <td>{iv_atm !== null && iv_atm !== undefined ? (iv_atm * 100).toFixed(2) + '%' : 'N/A'}</td>
                     <td>Current implied volatility at ATM strike</td>
                   </tr>

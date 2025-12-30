@@ -486,9 +486,12 @@ async def polling_worker():
                     
                     # Calculate volatility metrics
                     price_15min_ago = get_price_15min_ago(current_time_utc)
+                    # Use full 15-minute micro-move history for RV(current)
+                    price_series_15min = [p["price"] for p in price_history]
                     volatility_metrics = calculate_volatility_metrics(
                         current_price=current_price,
                         price_15min_ago=price_15min_ago,
+                        price_series_15min=price_series_15min,
                         open_price=open_price,
                         market_open_time=market_open_time,
                         current_time=current_time_utc,
