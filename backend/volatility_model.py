@@ -160,10 +160,16 @@ def determine_market_state(
     rv_current_prev: Optional[float],
     iv_atm: Optional[float],
     iv_vwap: Optional[float],
+    market_open_time: Optional[datetime] = None,
+    current_time: Optional[datetime] = None,
     expansion_rv_multiplier: float = 1.5,
+    transition_minutes_guardrail: int = 30,
 ) -> Tuple[str, Dict]:
     """
     Determine market state: CONTRACTION, TRANSITION, or EXPANSION
+    
+    Guardrail: TRANSITION state is not allowed before X minutes from market open
+    (default: 30 minutes)
     
     Returns:
         (state_name, state_info)
@@ -177,6 +183,13 @@ def determine_market_state(
             "iv_atm": iv_atm,
             "iv_vwap": iv_vwap
         })
+    
+    # Check if we're within the guardrail period (before X minutes from open)
+    within_guardrail = False
+    if market_open_time is not None and current_time is not None:
+        time_since_open = current_time - market_open_time
+        minutes_since_open = time_since_open.total_seconds() / 60
+        within_guardrail = minutes_since_open < transition_minutes_guardrail
     
     # CONTRACTION (NO TRADE)
     # Conditions:
@@ -197,17 +210,33 @@ def determine_market_state(
     # - RV_current > RV_open_norm
     # - RV_current(t) > RV_current(t-1) (accelerating)
     # - IV <= IV_VWAP
+    # - GUARDRAIL: At least X minutes must have passed since market open
     is_accelerating = rv_current_prev is not None and rv_current > rv_current_prev
-    if rv_current > rv_open_norm and is_accelerating and iv_atm <= iv_vwap:
-        return ("TRANSITION", {
-            "reason": "Volatility accelerating but IV not repriced yet",
-            "action": "VALID ENTRY ZONE - Buy options here",
-            "rv_current": rv_current,
-            "rv_open_norm": rv_open_norm,
-            "iv_atm": iv_atm,
-            "iv_vwap": iv_vwap,
-            "is_accelerating": True
-        })
+    transition_conditions_met = rv_current > rv_open_norm and is_accelerating and iv_atm <= iv_vwap
+    
+    if transition_conditions_met:
+        if within_guardrail:
+            # Guardrail: Force CONTRACTION if within guardrail period
+            return ("CONTRACTION", {
+                "reason": f"TRANSITION blocked by guardrail - less than {transition_minutes_guardrail} minutes from open",
+                "action": "NO TRADE - Wait for guardrail period to pass",
+                "rv_current": rv_current,
+                "rv_open_norm": rv_open_norm,
+                "iv_atm": iv_atm,
+                "iv_vwap": iv_vwap,
+                "guardrail_active": True,
+                "minutes_since_open": (current_time - market_open_time).total_seconds() / 60 if market_open_time and current_time else None
+            })
+        else:
+            return ("TRANSITION", {
+                "reason": "Volatility accelerating but IV not repriced yet",
+                "action": "VALID ENTRY ZONE - Buy options here",
+                "rv_current": rv_current,
+                "rv_open_norm": rv_open_norm,
+                "iv_atm": iv_atm,
+                "iv_vwap": iv_vwap,
+                "is_accelerating": True
+            })
     
     # EXPANSION (DO NOT ENTER FRESH)
     # Conditions:
@@ -225,16 +254,30 @@ def determine_market_state(
         })
     
     # Default to TRANSITION if RV_current > RV_open_norm but not accelerating
+    # BUT: Apply guardrail here too
     if rv_current > rv_open_norm:
-        return ("TRANSITION", {
-            "reason": "Volatility above average but not accelerating",
-            "action": "Monitor - Entry may be valid if acceleration occurs",
-            "rv_current": rv_current,
-            "rv_open_norm": rv_open_norm,
-            "iv_atm": iv_atm,
-            "iv_vwap": iv_vwap,
-            "is_accelerating": False
-        })
+        if within_guardrail:
+            # Guardrail: Force CONTRACTION if within guardrail period
+            return ("CONTRACTION", {
+                "reason": f"TRANSITION blocked by guardrail - less than {transition_minutes_guardrail} minutes from open",
+                "action": "NO TRADE - Wait for guardrail period to pass",
+                "rv_current": rv_current,
+                "rv_open_norm": rv_open_norm,
+                "iv_atm": iv_atm,
+                "iv_vwap": iv_vwap,
+                "guardrail_active": True,
+                "minutes_since_open": (current_time - market_open_time).total_seconds() / 60 if market_open_time and current_time else None
+            })
+        else:
+            return ("TRANSITION", {
+                "reason": "Volatility above average but not accelerating",
+                "action": "Monitor - Entry may be valid if acceleration occurs",
+                "rv_current": rv_current,
+                "rv_open_norm": rv_open_norm,
+                "iv_atm": iv_atm,
+                "iv_vwap": iv_vwap,
+                "is_accelerating": False
+            })
     
     # Default fallback
     return ("CONTRACTION", {
@@ -273,7 +316,10 @@ def calculate_volatility_metrics(
     
     # Determine market state
     state_name, state_info = determine_market_state(
-        rv_current, rv_open_norm, rv_current_prev, iv_atm, iv_vwap, expansion_rv_multiplier
+        rv_current, rv_open_norm, rv_current_prev, iv_atm, iv_vwap, 
+        market_open_time=market_open_time,
+        current_time=current_time,
+        expansion_rv_multiplier=expansion_rv_multiplier
     )
     
     return {

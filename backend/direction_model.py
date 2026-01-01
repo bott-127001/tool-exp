@@ -30,7 +30,16 @@ def calculate_gap_and_acceptance(
     Gap         = Open - PreviousClose
     Gap_Pct     = |Gap| / PreviousDayRange
 
-    Acceptance_Ratio = Time_in_Gap_Direction / Total_Time
+    Acceptance_Ratio = % of 5-min closes in gap direction after first 30 min
+    
+    NEW IMPLEMENTATION:
+    - Filters prices to only include those after first 30 minutes from session_start
+    - Groups prices into 5-minute candles
+    - For each 5-minute candle, uses the close price (last price in that window)
+    - Counts how many 5-minute closes are in the gap direction
+    - Calculates the percentage
+    
+    This approach is less noisy than tick-based and less laggy than candle-close based.
 
     NOTE: For now, this implementation assumes previous_close and previous_day_range
     are not yet available from the DB, so it focuses on Acceptance_Ratio and treats
@@ -55,36 +64,84 @@ def calculate_gap_and_acceptance(
     else:
         gap = 0.0  # Treat as non-gap day for now
 
-    # Acceptance: time above/below open in the direction of the gap
-    # intraday_prices: list of {"timestamp": dt, "price": float} sorted ascending
-    total_seconds = 0.0
-    time_in_gap_direction = 0.0
-
-    for i in range(1, len(intraday_prices)):
-        p_prev = intraday_prices[i - 1]
-        p_cur = intraday_prices[i]
-        dt = (p_cur["timestamp"] - p_prev["timestamp"]).total_seconds()
-        if dt <= 0:
-            continue
-        total_seconds += dt
-
-        price = p_prev["price"]
-        if gap > 0:
-            # Gap UP → time price stays above open
-            if price >= open_price:
-                time_in_gap_direction += dt
-        elif gap < 0:
-            # Gap DOWN → time price stays below open
-            if price <= open_price:
-                time_in_gap_direction += dt
+    # Acceptance: % of 5-min closes in gap direction after first 30 min
+    # NEW IMPLEMENTATION:
+    # 1. Filter prices to only include those after first 30 minutes from session_start
+    # 2. Group prices into 5-minute candles
+    # 3. For each 5-minute candle, get the close price (last price in that window)
+    # 4. Count how many 5-minute closes are in the gap direction
+    # 5. Calculate the percentage
+    
+    # Filter prices after first 30 minutes
+    guardrail_end_time = session_start + timedelta(minutes=30)
+    prices_after_30min = [
+        p for p in intraday_prices 
+        if p["timestamp"] > guardrail_end_time
+    ]
+    
+    if not prices_after_30min:
+        # Not enough data after 30 minutes
+        result["acceptance_ratio"] = None
+        return result
+    
+    # Group prices into 5-minute candles
+    # Each candle represents a 5-minute window
+    candle_closes = []  # List of close prices for each 5-minute candle
+    
+    # Start from guardrail_end_time and create 5-minute windows
+    current_window_start = guardrail_end_time
+    window_prices = []
+    
+    for price_entry in prices_after_30min:
+        timestamp = price_entry["timestamp"]
+        price = price_entry["price"]
+        
+        # Check if this price belongs to the current 5-minute window
+        if timestamp < current_window_start + timedelta(minutes=5):
+            window_prices.append(price)
         else:
-            # No meaningful gap → treat direction as time above vs below open
-            if price >= open_price:
-                time_in_gap_direction += dt
-
-    if total_seconds > 0:
-        acceptance_ratio = time_in_gap_direction / total_seconds
-        result["acceptance_ratio"] = acceptance_ratio
+            # Close the current window and start a new one
+            if window_prices:
+                # Close price is the last price in the window
+                candle_closes.append(window_prices[-1])
+            
+            # Start new window
+            # Find the start of the 5-minute window this price belongs to
+            minutes_since_guardrail = (timestamp - guardrail_end_time).total_seconds() / 60
+            window_number = int(minutes_since_guardrail / 5)
+            current_window_start = guardrail_end_time + timedelta(minutes=window_number * 5)
+            window_prices = [price]
+    
+    # Don't forget the last window
+    if window_prices:
+        candle_closes.append(window_prices[-1])
+    
+    # Calculate acceptance ratio: % of 5-min closes in gap direction
+    if not candle_closes:
+        result["acceptance_ratio"] = None
+        return result
+    
+    closes_in_gap_direction = 0
+    total_closes = len(candle_closes)
+    
+    for close_price in candle_closes:
+        if gap > 0:
+            # Gap UP → close above open
+            if close_price >= open_price:
+                closes_in_gap_direction += 1
+        elif gap < 0:
+            # Gap DOWN → close below open
+            if close_price <= open_price:
+                closes_in_gap_direction += 1
+        else:
+            # No meaningful gap → treat as close above open
+            if close_price >= open_price:
+                closes_in_gap_direction += 1
+    
+    acceptance_ratio = closes_in_gap_direction / total_closes if total_closes > 0 else None
+    result["acceptance_ratio"] = acceptance_ratio
+    
+    if acceptance_ratio is not None:
 
         # Bias logic from spec (configurable thresholds)
         if gap > 0 and acceptance_ratio > gap_acceptance_threshold:

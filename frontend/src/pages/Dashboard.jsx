@@ -77,52 +77,35 @@ function Dashboard() {
         </p>
       </div>
 
-      {/* Greek Signature Table */}
+      {/* Direction & Asymmetry State Card */}
       <div className="card" style={{ marginTop: '20px' }}>
-        <h2>Greek Signature Detector</h2>
-        {hasData && signals && signals.length > 0 ? (
-          <div className="table-responsive-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Position</th>
-                  <th>Delta</th>
-                  <th>Vega</th>
-                  <th>Theta</th>
-                  <th>Gamma</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {signals.map((signal, index) => (
-                  <tr key={index} style={signal.all_matched ? { backgroundColor: '#d4edda' } : {}}>
-                    <td><strong>{signal.position}</strong></td>
-                    <td style={{ textAlign: 'center' }}>
-                      {getTickCross(signal.delta.match)}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      {getTickCross(signal.vega.match)}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      {getTickCross(signal.theta.match)}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      {getTickCross(signal.gamma.match)}
-                    </td>
-                    <td>
-                      {signal.all_matched ? (
-                        <span className="tick">Signal Detected!</span>
-                      ) : (
-                        <span>-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <h2>Direction & Asymmetry</h2>
+        {hasData && Object.keys(directionData).length > 0 ? (
+          <div style={{
+            padding: '20px',
+            marginTop: '15px',
+            borderRadius: '8px',
+            border: `2px solid ${getDirectionalColor(directionalState)}`,
+            backgroundColor: getDirectionalColor(directionalState) + '20',
+            textAlign: 'center',
+          }}>
+            <h3 style={{
+              color: getDirectionalColor(directionalState),
+              margin: '10px 0',
+              fontSize: '28px',
+            }}>
+              {getDirectionalLabel(directionalState)}
+            </h3>
+            <p style={{
+              fontSize: '16px',
+              marginTop: '10px',
+              color: '#333',
+            }}>
+              {directionalInfo.reason || 'Waiting for directional assessment...'}
+            </p>
           </div>
         ) : (
-          <p>Waiting for signal data...</p>
+          <p>Waiting for direction & asymmetry data...</p>
         )}
       </div>
 
@@ -169,35 +152,52 @@ function Dashboard() {
         )}
       </div>
 
-      {/* Direction & Asymmetry State Card */}
+      {/* Greek Signature Table */}
       <div className="card" style={{ marginTop: '20px' }}>
-        <h2>Direction & Asymmetry</h2>
-        {hasData && Object.keys(directionData).length > 0 ? (
-          <div style={{
-            padding: '20px',
-            marginTop: '15px',
-            borderRadius: '8px',
-            border: `2px solid ${getDirectionalColor(directionalState)}`,
-            backgroundColor: getDirectionalColor(directionalState) + '20',
-            textAlign: 'center',
-          }}>
-            <h3 style={{
-              color: getDirectionalColor(directionalState),
-              margin: '10px 0',
-              fontSize: '28px',
-            }}>
-              {getDirectionalLabel(directionalState)}
-            </h3>
-            <p style={{
-              fontSize: '16px',
-              marginTop: '10px',
-              color: '#333',
-            }}>
-              {directionalInfo.reason || 'Waiting for directional assessment...'}
-            </p>
+        <h2>Greek Signature Detector</h2>
+        {hasData && signals && signals.length > 0 ? (
+          <div className="table-responsive-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Position</th>
+                  <th>Delta</th>
+                  <th>Vega</th>
+                  <th>Theta</th>
+                  <th>Gamma</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {signals.map((signal, index) => (
+                  <tr key={index} style={signal.all_matched ? { backgroundColor: '#d4edda' } : {}}>
+                    <td><strong>{signal.position}</strong></td>
+                    <td style={{ textAlign: 'center' }}>
+                      {getTickCross(signal.delta.match)}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {getTickCross(signal.vega.match)}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {getTickCross(signal.theta.match)}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {getTickCross(signal.gamma.match)}
+                    </td>
+                    <td>
+                      {signal.all_matched ? (
+                        <span className="tick">Signal Detected!</span>
+                      ) : (
+                        <span>-</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
-          <p>Waiting for direction & asymmetry data...</p>
+          <p>Waiting for signal data...</p>
         )}
       </div>
     </>
