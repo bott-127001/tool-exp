@@ -4,7 +4,7 @@ import { useData } from './DataContext';
 import { useAuth } from './AuthContext';
 
 function Layout() {
-  const { connected } = useData();
+  const { data, connected } = useData();
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
