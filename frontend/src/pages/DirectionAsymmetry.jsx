@@ -12,6 +12,9 @@ function DirectionAsymmetry() {
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
   const [lastSavedDate, setLastSavedDate] = useState('')
+  const [showPrevDayModal, setShowPrevDayModal] = useState(false)
+  const [prevDayModalType, setPrevDayModalType] = useState(null) // 'missing' or 'stale'
+  const [dataLoaded, setDataLoaded] = useState(false)
 
   const directionData = data.direction_metrics || {}
   const volatilityData = data.volatility_metrics || {}
@@ -47,12 +50,59 @@ function DirectionAsymmetry() {
           )
           setLastSavedDate(res.data.prev_day_date || '')
         }
+        setDataLoaded(true)
       } catch (err) {
         console.error('Failed to load previous-day inputs', err)
+        setDataLoaded(true) // Still mark as loaded even on error
       }
     }
     fetchPrevDayInputs()
   }, [currentUser])
+
+  // Check for missing or stale previous day data and show popup
+  useEffect(() => {
+    if (!currentUser || !dataLoaded || showPrevDayModal) return
+
+    // Check if data is missing (no saved date OR both fields are empty/null)
+    const hasNoData = !lastSavedDate || 
+                      !prevDayClose || 
+                      !prevDayRange || 
+                      prevDayClose === '' || 
+                      prevDayRange === '' ||
+                      prevDayClose === null ||
+                      prevDayRange === null
+    
+    // Check if data is stale (not from yesterday or today)
+    let isStale = false
+    if (lastSavedDate && !hasNoData) {
+      try {
+        const savedDate = new Date(lastSavedDate)
+        const today = new Date()
+        const yesterday = new Date(today)
+        yesterday.setDate(yesterday.getDate() - 1)
+        
+        // Reset time to compare dates only
+        savedDate.setHours(0, 0, 0, 0)
+        today.setHours(0, 0, 0, 0)
+        yesterday.setHours(0, 0, 0, 0)
+        
+        // Data is stale if it's not from today or yesterday
+        isStale = savedDate.getTime() !== today.getTime() && savedDate.getTime() !== yesterday.getTime()
+      } catch (err) {
+        // If date parsing fails, consider it stale
+        isStale = true
+      }
+    }
+
+    // Show modal if data is missing or stale (only once)
+    if (hasNoData) {
+      setPrevDayModalType('missing')
+      setShowPrevDayModal(true)
+    } else if (isStale) {
+      setPrevDayModalType('stale')
+      setShowPrevDayModal(true)
+    }
+  }, [prevDayClose, prevDayRange, lastSavedDate, currentUser, dataLoaded, showPrevDayModal])
 
   const handleSavePrevDayInputs = async (e) => {
     e.preventDefault()
@@ -71,6 +121,10 @@ function DirectionAsymmetry() {
       })
       setLastSavedDate(todayIso)
       setSaveMsg('Saved. New values will apply on next data poll.')
+      // Close modal if it was open
+      if (showPrevDayModal) {
+        setShowPrevDayModal(false)
+      }
       setTimeout(() => setSaveMsg(''), 3000)
     } catch (err) {
       console.error('Failed to save previous-day inputs', err)
@@ -130,8 +184,42 @@ function DirectionAsymmetry() {
 
   const tradePermission = getTradePermission()
 
+  const closeModal = () => {
+    setShowPrevDayModal(false)
+  }
+
   return (
     <>
+      {/* Modal for Previous Day Data Warning */}
+      {showPrevDayModal && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Previous Day Data Notice</h3>
+              <button className="modal-close" onClick={closeModal}>×</button>
+            </div>
+            <div className="modal-body">
+              {prevDayModalType === 'missing' ? (
+                <>
+                  <p><strong>There is no previous day data.</strong></p>
+                  <p>Please input Previous Close and Previous Day Range to enable Gap/Gap% calculations.</p>
+                </>
+              ) : (
+                <>
+                  <p><strong>Previous day data is stale.</strong></p>
+                  <p>You cannot use the same previous day data for 2 days or more. Please update the values for today.</p>
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={closeModal}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <h2>Direction & Asymmetry Model (Price-Based)</h2>
       </div>
