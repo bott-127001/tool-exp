@@ -1,30 +1,113 @@
-import React, { useState, useEffect } from 'react';
-import { Link, Outlet, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useData } from './DataContext';
 import { useAuth } from './AuthContext';
+import axios from 'axios';
 
 function Layout() {
   const { data, connected } = useData();
-  const { logout } = useAuth();
+  const { logout, currentUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showPrevDayModal, setShowPrevDayModal] = useState(false);
   const [prevDayModalType, setPrevDayModalType] = useState(null); // 'missing' or 'stale'
+  const [prevDayClose, setPrevDayClose] = useState(null);
+  const [prevDayRange, setPrevDayRange] = useState(null);
+  const [lastSavedDate, setLastSavedDate] = useState(null);
+  const checkIntervalRef = useRef(null);
 
-  // Check if we need to show the modal
-  const needsInput = data?.direction_metrics?.opening?.needs_prev_day_input;
-  const isStale = data?.direction_metrics?.opening?.stale_prev_day_data;
-
-  // Show modal when data changes and conditions are met
+  // Fetch previous day settings
   useEffect(() => {
-    if (needsInput && !showPrevDayModal) {
+    const fetchPrevDaySettings = async () => {
+      if (!currentUser) return;
+      try {
+        const res = await axios.get(`/api/settings/${currentUser}`);
+        if (res.data) {
+          setPrevDayClose(res.data.prev_day_close);
+          setPrevDayRange(res.data.prev_day_range);
+          setLastSavedDate(res.data.prev_day_date || null);
+        }
+      } catch (err) {
+        console.error('Failed to load previous-day settings', err);
+      }
+    };
+    fetchPrevDaySettings();
+  }, [currentUser]);
+
+  // Check for missing or stale data and show modal
+  const checkPrevDayData = useCallback(() => {
+    if (!currentUser) return;
+
+    // Check if data is missing
+    const hasNoData = !prevDayClose || 
+                      !prevDayRange || 
+                      prevDayClose === null || 
+                      prevDayRange === null ||
+                      prevDayClose === '' ||
+                      prevDayRange === '' ||
+                      !lastSavedDate;
+    
+    // Check if data is stale (not from yesterday or today)
+    let isStale = false;
+    if (lastSavedDate && !hasNoData) {
+      try {
+        const savedDate = new Date(lastSavedDate);
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        // Reset time to compare dates only
+        savedDate.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        yesterday.setHours(0, 0, 0, 0);
+        
+        // Data is stale if it's not from today or yesterday
+        isStale = savedDate.getTime() !== today.getTime() && savedDate.getTime() !== yesterday.getTime();
+      } catch (err) {
+        // If date parsing fails, consider it stale
+        isStale = true;
+      }
+    }
+
+    // Show modal if data is missing or stale (always check, don't prevent re-showing)
+    if (hasNoData) {
       setPrevDayModalType('missing');
       setShowPrevDayModal(true);
-    } else if (isStale && !showPrevDayModal && !needsInput) {
+    } else if (isStale) {
       setPrevDayModalType('stale');
       setShowPrevDayModal(true);
     }
-  }, [needsInput, isStale, showPrevDayModal]);
+  }, [currentUser, prevDayClose, prevDayRange, lastSavedDate]);
+
+  // Check on mount and when settings change
+  useEffect(() => {
+    if (currentUser && (prevDayClose !== null || prevDayRange !== null || lastSavedDate !== null)) {
+      checkPrevDayData();
+    }
+  }, [currentUser, prevDayClose, prevDayRange, lastSavedDate]);
+
+  // Check periodically and on route changes
+  useEffect(() => {
+    // Check immediately
+    if (currentUser) {
+      checkPrevDayData();
+    }
+
+    // Set up interval to check every 30 seconds
+    checkIntervalRef.current = setInterval(() => {
+      if (currentUser) {
+        checkPrevDayData();
+      }
+    }, 30000);
+
+    // Cleanup interval on unmount
+    return () => {
+      if (checkIntervalRef.current) {
+        clearInterval(checkIntervalRef.current);
+      }
+    };
+  }, [currentUser, location.pathname, checkPrevDayData]);
 
   const handleLogout = async () => {
     try {
@@ -47,6 +130,8 @@ function Layout() {
 
   const closeModal = () => {
     setShowPrevDayModal(false);
+    // Allow it to show again if conditions are still met
+    // The periodic check will re-trigger it if needed
   };
 
   const goToInput = () => {
@@ -58,31 +143,38 @@ function Layout() {
     <div className="container">
       {/* Modal for Previous Day Input Reminder */}
       {showPrevDayModal && (
-        <div className="modal-overlay" onClick={closeModal}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Previous Day Data Required</h3>
+        <div className="modal-overlay prev-day-modal-overlay" onClick={closeModal}>
+          <div className="modal-content prev-day-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header prev-day-modal-header">
+              <div className="modal-icon-wrapper">
+                {prevDayModalType === 'missing' ? (
+                  <span className="modal-icon">⚠️</span>
+                ) : (
+                  <span className="modal-icon">⏰</span>
+                )}
+              </div>
+              <h3>Previous Day Data Notice</h3>
               <button className="modal-close" onClick={closeModal}>×</button>
             </div>
-            <div className="modal-body">
+            <div className="modal-body prev-day-modal-body">
               {prevDayModalType === 'missing' ? (
                 <>
-                  <p><strong>Previous day stats missing.</strong></p>
-                  <p>Please input Previous Close and Previous Day Range on the Direction & Asymmetry page so Gap/Gap% and Acceptance can be calculated.</p>
+                  <p className="modal-message-title"><strong>There is no previous day data.</strong></p>
+                  <p className="modal-message-text">Please input Previous Close and Previous Day Range on the Direction & Asymmetry page to enable Gap/Gap% and Acceptance calculations.</p>
                 </>
               ) : (
                 <>
-                  <p><strong>Previous day stats look stale.</strong></p>
-                  <p>Update for today to keep Gap/Gap% accurate.</p>
+                  <p className="modal-message-title"><strong>Previous day data is stale.</strong></p>
+                  <p className="modal-message-text">You cannot use the same previous day data for 2 days or more. Please update the values for today to keep Gap/Gap% calculations accurate.</p>
                 </>
               )}
             </div>
-            <div className="modal-footer">
+            <div className="modal-footer prev-day-modal-footer">
               <button className="btn btn-secondary" onClick={closeModal}>
                 Cancel
               </button>
               <button className="btn btn-primary" onClick={goToInput}>
-                Go to Input
+                Go to Input Page
               </button>
             </div>
           </div>
