@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, Outlet, useNavigate } from 'react-router-dom';
 import { useData } from './DataContext';
 import { useAuth } from './AuthContext';
@@ -8,6 +8,23 @@ function Layout() {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [showPrevDayModal, setShowPrevDayModal] = useState(false);
+  const [prevDayModalType, setPrevDayModalType] = useState(null); // 'missing' or 'stale'
+
+  // Check if we need to show the modal
+  const needsInput = data?.direction_metrics?.opening?.needs_prev_day_input;
+  const isStale = data?.direction_metrics?.opening?.stale_prev_day_data;
+
+  // Show modal when data changes and conditions are met
+  useEffect(() => {
+    if (needsInput && !showPrevDayModal) {
+      setPrevDayModalType('missing');
+      setShowPrevDayModal(true);
+    } else if (isStale && !showPrevDayModal && !needsInput) {
+      setPrevDayModalType('stale');
+      setShowPrevDayModal(true);
+    }
+  }, [needsInput, isStale, showPrevDayModal]);
 
   const handleLogout = async () => {
     try {
@@ -28,80 +45,47 @@ function Layout() {
     setIsMenuOpen(false);
   };
 
+  const closeModal = () => {
+    setShowPrevDayModal(false);
+  };
+
+  const goToInput = () => {
+    setShowPrevDayModal(false);
+    navigate('/direction-asymmetry');
+  };
+
   return (
     <div className="container">
-      {data?.direction_metrics?.opening?.needs_prev_day_input && (
-        <div
-          style={{
-            backgroundColor: '#fff3cd',
-            border: '1px solid #ffeeba',
-            color: '#856404',
-            padding: '10px 14px',
-            borderRadius: '6px',
-            marginBottom: '12px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '10px',
-            flexWrap: 'wrap'
-          }}
-        >
-          <div>
-            <strong>Previous day stats missing.</strong> Please input Previous Close and Previous Day Range on the
-            <Link to="/direction-asymmetry" style={{ marginLeft: '6px', color: '#0056b3', fontWeight: 600 }}>
-              Direction &amp; Asymmetry
-            </Link>{' '}
-            page so Gap/Gap% and Acceptance can be calculated.
+      {/* Modal for Previous Day Input Reminder */}
+      {showPrevDayModal && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Previous Day Data Required</h3>
+              <button className="modal-close" onClick={closeModal}>×</button>
+            </div>
+            <div className="modal-body">
+              {prevDayModalType === 'missing' ? (
+                <>
+                  <p><strong>Previous day stats missing.</strong></p>
+                  <p>Please input Previous Close and Previous Day Range on the Direction & Asymmetry page so Gap/Gap% and Acceptance can be calculated.</p>
+                </>
+              ) : (
+                <>
+                  <p><strong>Previous day stats look stale.</strong></p>
+                  <p>Update for today to keep Gap/Gap% accurate.</p>
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={closeModal}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={goToInput}>
+                Go to Input
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => navigate('/direction-asymmetry')}
-            style={{
-              padding: '6px 12px',
-              backgroundColor: '#ffc107',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              color: '#212529',
-              fontWeight: 600
-            }}
-          >
-            Go to Input
-          </button>
-        </div>
-      )}
-      {data?.direction_metrics?.opening?.stale_prev_day_data && (
-        <div
-          style={{
-            backgroundColor: '#fff3cd',
-            border: '1px solid #ffeeba',
-            color: '#856404',
-            padding: '10px 14px',
-            borderRadius: '6px',
-            marginBottom: '12px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '10px',
-            flexWrap: 'wrap'
-          }}
-        >
-          <div>
-            <strong>Previous day stats look stale.</strong> Update for today to keep Gap/Gap% accurate.
-          </div>
-          <button
-            onClick={() => navigate('/direction-asymmetry')}
-            style={{
-              padding: '6px 12px',
-              backgroundColor: '#ffc107',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              color: '#212529',
-              fontWeight: 600
-            }}
-          >
-            Update Now
-          </button>
         </div>
       )}
       <div className="nav">
