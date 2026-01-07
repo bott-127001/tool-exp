@@ -274,17 +274,33 @@ async def clear_daily_baseline(username: str, date_str: str):
         print(f"🗑️ Cleared baseline from DB for {username} on {date_str}")
 
 
-def get_market_open_time(current_time_utc: datetime) -> datetime:
+def get_market_open_time(current_time: datetime) -> datetime:
     """
-    Get market open time for the current day (09:15 IST)
-    Returns datetime in UTC
+    Get market open time for the current day (09:15 IST), returned as UTC.
+
+    NOTE:
+    - Handles both timezone-aware and naive datetimes.
+    - If a timestamp already includes an offset (e.g. IST +05:30), we convert
+      it correctly to UTC before computing the session open, avoiding double
+      application of the IST offset.
     """
-    # Convert UTC to IST
-    now_ist = current_time_utc + timedelta(hours=5, minutes=30)
+    # Normalize input to UTC
+    if current_time.tzinfo is None:
+        current_time_utc = current_time.replace(tzinfo=timezone.utc)
+    else:
+        current_time_utc = current_time.astimezone(timezone.utc)
+
+    # Define IST timezone
+    ist = timezone(timedelta(hours=5, minutes=30))
+
+    # Convert UTC → IST
+    now_ist = current_time_utc.astimezone(ist)
+
     # Create market open time in IST (09:15)
     market_open_ist = now_ist.replace(hour=9, minute=15, second=0, microsecond=0)
-    # Convert back to UTC (IST = UTC + 5:30, so UTC = IST - 5:30)
-    market_open_utc = market_open_ist - timedelta(hours=5, minutes=30)
+
+    # Convert back IST → UTC
+    market_open_utc = market_open_ist.astimezone(timezone.utc)
     return market_open_utc
 
 
@@ -522,6 +538,7 @@ async def polling_worker():
                     direction_metrics = calculate_direction_metrics(
                         price_history=full_day_price_history,
                         market_open_time=market_open_time,
+                        current_time=current_time_utc,
                         settings=settings,
                     )
 

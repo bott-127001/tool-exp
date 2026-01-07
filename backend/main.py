@@ -163,6 +163,10 @@ async def get_settings(user: str):
             "dir_rea_neutral_abs_threshold": 0.3,
             "dir_de_directional_threshold": 0.5,
             "dir_de_neutral_threshold": 0.3,
+            # Optional previous-day inputs (for Opening Location & Gap Acceptance)
+            "prev_day_close": None,
+            "prev_day_range": None,
+            "prev_day_date": None,  # ISO date string of the provided previous-day stats
         }
     
     # Convert ObjectId to string to avoid JSON serialization error

@@ -1,8 +1,17 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
+import axios from 'axios'
 import { useData } from './DataContext'
+import { useAuth } from './AuthContext'
 
 function DirectionAsymmetry() {
   const { data } = useData()
+  const { currentUser } = useAuth()
+
+  const [prevDayClose, setPrevDayClose] = useState('')
+  const [prevDayRange, setPrevDayRange] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveMsg, setSaveMsg] = useState('')
+  const [lastSavedDate, setLastSavedDate] = useState('')
 
   const directionData = data.direction_metrics || {}
   const volatilityData = data.volatility_metrics || {}
@@ -19,6 +28,57 @@ function DirectionAsymmetry() {
     data.underlying_price !== null &&
     data.underlying_price !== undefined &&
     Object.keys(directionData).length > 0
+
+  useEffect(() => {
+    const fetchPrevDayInputs = async () => {
+      if (!currentUser) return
+      try {
+        const res = await axios.get(`/api/settings/${currentUser}`)
+        if (res.data) {
+          setPrevDayClose(
+            res.data.prev_day_close !== null && res.data.prev_day_close !== undefined
+              ? res.data.prev_day_close
+              : ''
+          )
+          setPrevDayRange(
+            res.data.prev_day_range !== null && res.data.prev_day_range !== undefined
+              ? res.data.prev_day_range
+              : ''
+          )
+          setLastSavedDate(res.data.prev_day_date || '')
+        }
+      } catch (err) {
+        console.error('Failed to load previous-day inputs', err)
+      }
+    }
+    fetchPrevDayInputs()
+  }, [currentUser])
+
+  const handleSavePrevDayInputs = async (e) => {
+    e.preventDefault()
+    if (!currentUser) {
+      setSaveMsg('Not logged in. Please re-login.')
+      return
+    }
+    setSaving(true)
+    setSaveMsg('')
+    try {
+      const todayIso = new Date().toISOString().slice(0, 10)
+      await axios.put(`/api/settings/${currentUser}`, {
+        prev_day_close: prevDayClose === '' ? null : parseFloat(prevDayClose),
+        prev_day_range: prevDayRange === '' ? null : parseFloat(prevDayRange),
+        prev_day_date: todayIso,
+      })
+      setLastSavedDate(todayIso)
+      setSaveMsg('Saved. New values will apply on next data poll.')
+      setTimeout(() => setSaveMsg(''), 3000)
+    } catch (err) {
+      console.error('Failed to save previous-day inputs', err)
+      setSaveMsg('Error saving. Try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const getDirectionalColor = (state) => {
     switch (state) {
@@ -74,6 +134,68 @@ function DirectionAsymmetry() {
     <>
       <div className="card">
         <h2>Direction & Asymmetry Model (Price-Based)</h2>
+      </div>
+
+      {/* Previous Day Inputs (Optional) */}
+      <div className="card" style={{ marginTop: '20px' }}>
+        <h3>Previous Day Inputs (Optional)</h3>
+        <p style={{ color: '#666', fontSize: '14px', marginBottom: '10px' }}>
+          Hybrid: system uses its data when available; if not, provide values here. These feed into Gap and Gap %.
+          Saved values expire daily—please update each day.
+        </p>
+        <form onSubmit={handleSavePrevDayInputs} style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <label htmlFor="prev_day_close" style={{ fontWeight: 500, marginBottom: '4px' }}>Previous Day Close</label>
+            <input
+              id="prev_day_close"
+              name="prev_day_close"
+              type="number"
+              step="0.05"
+              min="0"
+              value={prevDayClose}
+              onChange={(e) => setPrevDayClose(e.target.value)}
+              style={{ padding: '8px', minWidth: '160px' }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <label htmlFor="prev_day_range" style={{ fontWeight: 500, marginBottom: '4px' }}>Previous Day Range (High - Low)</label>
+            <input
+              id="prev_day_range"
+              name="prev_day_range"
+              type="number"
+              step="0.05"
+              min="0"
+              value={prevDayRange}
+              onChange={(e) => setPrevDayRange(e.target.value)}
+              style={{ padding: '8px', minWidth: '160px' }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+            <span style={{ fontSize: '12px', color: '#666' }}>
+              {lastSavedDate ? `Last saved for: ${lastSavedDate}` : 'No saved date'}
+            </span>
+          </div>
+          <button
+            type="submit"
+            disabled={saving}
+            style={{
+              padding: '10px 16px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              alignSelf: 'flex-end'
+            }}
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </form>
+        {saveMsg && (
+          <p style={{ marginTop: '10px', color: saveMsg.startsWith('Error') ? '#dc3545' : '#28a745' }}>
+            {saveMsg}
+          </p>
+        )}
       </div>
 
       {hasData ? (
@@ -155,7 +277,7 @@ function DirectionAsymmetry() {
                         ? opening.acceptance_ratio.toFixed(2)
                         : 'N/A'}
                     </td>
-                    <td>Time in gap direction / total time after open</td>
+                    <td>% of 5-min closes in gap direction after first 30 minutes</td>
                   </tr>
                   <tr>
                     <td>

@@ -30,6 +30,80 @@ function Layout() {
 
   return (
     <div className="container">
+      {data?.direction_metrics?.opening?.needs_prev_day_input && (
+        <div
+          style={{
+            backgroundColor: '#fff3cd',
+            border: '1px solid #ffeeba',
+            color: '#856404',
+            padding: '10px 14px',
+            borderRadius: '6px',
+            marginBottom: '12px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '10px',
+            flexWrap: 'wrap'
+          }}
+        >
+          <div>
+            <strong>Previous day stats missing.</strong> Please input Previous Close and Previous Day Range on the
+            <Link to="/direction-asymmetry" style={{ marginLeft: '6px', color: '#0056b3', fontWeight: 600 }}>
+              Direction &amp; Asymmetry
+            </Link>{' '}
+            page so Gap/Gap% and Acceptance can be calculated.
+          </div>
+          <button
+            onClick={() => navigate('/direction-asymmetry')}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: '#ffc107',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              color: '#212529',
+              fontWeight: 600
+            }}
+          >
+            Go to Input
+          </button>
+        </div>
+      )}
+      {data?.direction_metrics?.opening?.stale_prev_day_data && (
+        <div
+          style={{
+            backgroundColor: '#fff3cd',
+            border: '1px solid #ffeeba',
+            color: '#856404',
+            padding: '10px 14px',
+            borderRadius: '6px',
+            marginBottom: '12px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '10px',
+            flexWrap: 'wrap'
+          }}
+        >
+          <div>
+            <strong>Previous day stats look stale.</strong> Update for today to keep Gap/Gap% accurate.
+          </div>
+          <button
+            onClick={() => navigate('/direction-asymmetry')}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: '#ffc107',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              color: '#212529',
+              fontWeight: 600
+            }}
+          >
+            Update Now
+          </button>
+        </div>
+      )}
       <div className="nav">
         <button 
           className="hamburger-btn"

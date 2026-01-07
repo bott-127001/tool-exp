@@ -50,6 +50,9 @@ def calculate_gap_and_acceptance(
         "gap_pct": None,
         "acceptance_ratio": None,
         "bias": "NEUTRAL",  # BULLISH / BEARISH / NEUTRAL
+        "needs_prev_day_input": False,
+        "missing_prev_fields": [],
+        "stale_prev_day_data": False,
     }
 
     if open_price is None or not intraday_prices:
@@ -63,6 +66,13 @@ def calculate_gap_and_acceptance(
         result["gap_pct"] = gap_pct
     else:
         gap = 0.0  # Treat as non-gap day for now
+        result["needs_prev_day_input"] = True
+        missing = []
+        if previous_close is None:
+            missing.append("previous_close")
+        if previous_day_range is None or previous_day_range <= 0:
+            missing.append("previous_day_range")
+        result["missing_prev_fields"] = missing
 
     # Acceptance: % of 5-min closes in gap direction after first 30 min
     # NEW IMPLEMENTATION:
@@ -291,6 +301,7 @@ def determine_directional_state(
 def calculate_direction_metrics(
     price_history: List[Dict],
     market_open_time: Optional[datetime],
+    current_time: Optional[datetime] = None,
     settings: Optional[Dict] = None,
 ) -> Dict:
     """
@@ -313,7 +324,7 @@ def calculate_direction_metrics(
             "directional_info": {"reason": "Insufficient intraday data"},
         }
 
-    # Defaults for thresholds
+    # Defaults for thresholds and optional previous-day inputs
     settings = settings or {}
     gap_acceptance_threshold = settings.get("dir_gap_acceptance_threshold", 0.65)
     acceptance_neutral_threshold = settings.get("dir_acceptance_neutral_threshold", 0.5)
@@ -323,6 +334,35 @@ def calculate_direction_metrics(
     de_directional_threshold = settings.get("dir_de_directional_threshold", 0.5)
     de_neutral_threshold = settings.get("dir_de_neutral_threshold", 0.3)
 
+    # Optional previous-day inputs (can be provided from Direction & Asymmetry UI)
+    previous_close = settings.get("prev_day_close")
+    previous_day_range = settings.get("prev_day_range")
+    previous_day_date_str = settings.get("prev_day_date")
+
+    # Determine if previous-day inputs are stale (not from yesterday)
+    stale_prev_day_data = False
+    if current_time:
+        today_date = current_time.date()
+    elif market_open_time:
+        today_date = market_open_time.date()
+    else:
+        today_date = None
+
+    if today_date and previous_day_date_str:
+        try:
+            from datetime import date
+            prev_day_date = date.fromisoformat(previous_day_date_str)
+            expected_prev_date = today_date - timedelta(days=1)
+            if prev_day_date != expected_prev_date:
+                stale_prev_day_data = True
+        except Exception:
+            stale_prev_day_data = True
+
+    # If stale, ignore previous-day values for calculations
+    if stale_prev_day_data:
+        previous_close = None
+        previous_day_range = None
+
     # Ensure history is sorted by time
     history_sorted = sorted(price_history, key=lambda p: p["timestamp"])
     intraday_prices = history_sorted
@@ -331,16 +371,19 @@ def calculate_direction_metrics(
     open_price = intraday_prices[0]["price"]
     close_price = intraday_prices[-1]["price"]
 
-    # For now, previous day close/range unknown → pass None values
     opening = calculate_gap_and_acceptance(
         open_price=open_price,
-        previous_close=None,
-        previous_day_range=None,
+        previous_close=previous_close,
+        previous_day_range=previous_day_range,
         intraday_prices=intraday_prices,
         session_start=market_open_time,
         gap_acceptance_threshold=gap_acceptance_threshold,
         acceptance_neutral_threshold=acceptance_neutral_threshold,
     )
+
+    # Surface stale flag to the frontend if applicable
+    if stale_prev_day_data:
+        opening["stale_prev_day_data"] = True
 
     rea_data = calculate_rea(
         intraday_prices=intraday_prices,

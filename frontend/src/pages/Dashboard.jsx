@@ -9,7 +9,7 @@ function Dashboard() {
   }
 
   const hasData = data.underlying_price !== null && data.underlying_price !== undefined
-  const { signals } = data
+  const { signals, underlying_price, atm_strike, timestamp } = data
 
   // Volatility Permission Data
   const volatilityData = data.volatility_metrics || {}
@@ -75,6 +75,23 @@ function Dashboard() {
         <p style={{ color: '#666', fontSize: '14px' }}>
           Overview of calculated values: Greek signatures, Volatility Permission, and Direction & Asymmetry states
         </p>
+      </div>
+
+      {/* Market Data (mirrors Greeks page) */}
+      <div className="card" style={{ marginTop: '20px' }}>
+        <h2>Market Data</h2>
+        {hasData ? (
+          <>
+            <p><strong>NIFTY50 Price:</strong> {underlying_price?.toFixed(2)}</p>
+            <p><strong>ATM Strike:</strong> {atm_strike}</p>
+            <p><strong>Last Updated:</strong> {timestamp ? new Date(timestamp).toLocaleString() : 'Waiting...'}</p>
+            <p style={{ fontSize: '12px', color: '#666' }}>
+              Data received at: {new Date().toLocaleTimeString()}
+            </p>
+          </>
+        ) : (
+          <p>{data.message || "Waiting for market data... Polling will start automatically."}</p>
+        )}
       </div>
 
       {/* Direction & Asymmetry State Card */}

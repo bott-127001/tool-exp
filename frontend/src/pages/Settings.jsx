@@ -16,7 +16,9 @@ function Settings() {
     dir_rea_bear_threshold: -0.3,
     dir_rea_neutral_abs_threshold: 0.3,
     dir_de_directional_threshold: 0.5,
-    dir_de_neutral_threshold: 0.3
+    dir_de_neutral_threshold: 0.3,
+    prev_day_close: '',
+    prev_day_range: ''
   })
   const { currentUser } = useAuth();
   const [saving, setSaving] = useState(false)
@@ -43,7 +45,7 @@ function Settings() {
     const { name, value } = e.target
     setSettings(prev => ({
       ...prev,
-      [name]: parseFloat(value) || value
+      [name]: value === '' ? '' : (isNaN(Number(value)) ? value : parseFloat(value))
     }))
   }
 
@@ -316,6 +318,40 @@ function Settings() {
               min="0"
               max="1"
               required
+            />
+          </div>
+
+          <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
+
+          <h3>Previous Day Inputs (Optional)</h3>
+          <p style={{ marginBottom: '10px', color: '#666', fontSize: '14px' }}>
+            Use these only when previous day data is not available from the broker. They feed into the
+            Opening Location & Gap Acceptance calculations.
+          </p>
+
+          <div className="form-group">
+            <label htmlFor="prev_day_close">Previous Day Close</label>
+            <input
+              type="number"
+              id="prev_day_close"
+              name="prev_day_close"
+              value={settings.prev_day_close ?? ''}
+              onChange={handleChange}
+              step="0.05"
+              min="0"
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="prev_day_range">Previous Day Range (High - Low)</label>
+            <input
+              type="number"
+              id="prev_day_range"
+              name="prev_day_range"
+              value={settings.prev_day_range ?? ''}
+              onChange={handleChange}
+              step="0.05"
+              min="0"
             />
           </div>
 
