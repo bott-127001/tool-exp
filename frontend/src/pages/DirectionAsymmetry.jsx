@@ -63,18 +63,22 @@ function DirectionAsymmetry() {
     setSaving(true)
     setSaveMsg('')
     try {
-      const todayIso = new Date().toISOString().slice(0, 10)
+      // prev_day_date should be yesterday's date (the date for which the previous day data is valid)
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      const prevDayDateIso = yesterday.toISOString().slice(0, 10)
+      
       const closeValue = prevDayClose === '' ? null : parseFloat(prevDayClose)
       const rangeValue = prevDayRange === '' ? null : parseFloat(prevDayRange)
       
       await axios.put(`/api/settings/${currentUser}`, {
         prev_day_close: closeValue,
         prev_day_range: rangeValue,
-        prev_day_date: todayIso,
+        prev_day_date: prevDayDateIso,
       })
       
       // Update local state immediately
-      setLastSavedDate(todayIso)
+      setLastSavedDate(prevDayDateIso)
       // Ensure values are set correctly (handle empty strings)
       if (closeValue !== null) {
         setPrevDayClose(String(closeValue))

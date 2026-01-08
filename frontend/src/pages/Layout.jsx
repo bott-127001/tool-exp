@@ -67,7 +67,7 @@ function Layout() {
                       prevDayRange === '' ||
                       !lastSavedDate;
     
-    // Check if data is stale (not from yesterday or today)
+    // Check if data is stale (not from yesterday - matching backend logic)
     let isStale = false;
     if (lastSavedDate && !hasNoData) {
       try {
@@ -78,11 +78,11 @@ function Layout() {
         
         // Reset time to compare dates only
         savedDate.setHours(0, 0, 0, 0);
-        today.setHours(0, 0, 0, 0);
         yesterday.setHours(0, 0, 0, 0);
         
-        // Data is stale if it's not from today or yesterday
-        isStale = savedDate.getTime() !== today.getTime() && savedDate.getTime() !== yesterday.getTime();
+        // Data is stale if it's not from yesterday (matching backend expectation)
+        // The prev_day_date should represent yesterday's date
+        isStale = savedDate.getTime() !== yesterday.getTime();
       } catch (err) {
         // If date parsing fails, consider it stale
         isStale = true;
