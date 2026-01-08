@@ -15,29 +15,48 @@ function Layout() {
   const [prevDayClose, setPrevDayClose] = useState(null);
   const [prevDayRange, setPrevDayRange] = useState(null);
   const [lastSavedDate, setLastSavedDate] = useState(null);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const checkIntervalRef = useRef(null);
+  const fetchSettingsRef = useRef(null);
 
   // Fetch previous day settings
-  useEffect(() => {
-    const fetchPrevDaySettings = async () => {
-      if (!currentUser) return;
-      try {
-        const res = await axios.get(`/api/settings/${currentUser}`);
-        if (res.data) {
-          setPrevDayClose(res.data.prev_day_close);
-          setPrevDayRange(res.data.prev_day_range);
-          setLastSavedDate(res.data.prev_day_date || null);
-        }
-      } catch (err) {
-        console.error('Failed to load previous-day settings', err);
+  const fetchPrevDaySettings = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const res = await axios.get(`/api/settings/${currentUser}`);
+      if (res.data) {
+        setPrevDayClose(res.data.prev_day_close);
+        setPrevDayRange(res.data.prev_day_range);
+        setLastSavedDate(res.data.prev_day_date || null);
+        setSettingsLoaded(true);
       }
-    };
-    fetchPrevDaySettings();
+    } catch (err) {
+      console.error('Failed to load previous-day settings', err);
+      setSettingsLoaded(true); // Mark as loaded even on error
+    }
   }, [currentUser]);
 
-  // Check for missing or stale data and show modal
+  // Initial fetch and refetch on user change
+  useEffect(() => {
+    fetchPrevDaySettings();
+  }, [fetchPrevDaySettings]);
+
+  // Refetch settings when navigating away from direction-asymmetry page (after potential save)
+  const prevPathRef = useRef(location.pathname);
+  useEffect(() => {
+    // If we navigated away from direction-asymmetry page, refetch settings
+    if (prevPathRef.current === '/direction-asymmetry' && location.pathname !== '/direction-asymmetry') {
+      // Small delay to ensure save has completed
+      setTimeout(() => {
+        fetchPrevDaySettings();
+      }, 500);
+    }
+    prevPathRef.current = location.pathname;
+  }, [location.pathname, fetchPrevDaySettings]);
+
+  // Check for missing or stale data and show modal (only once per session)
   const checkPrevDayData = useCallback(() => {
-    if (!currentUser) return;
+    if (!currentUser || !settingsLoaded) return;
 
     // Check if data is missing
     const hasNoData = !prevDayClose || 
@@ -70,44 +89,31 @@ function Layout() {
       }
     }
 
-    // Show modal if data is missing or stale (always check, don't prevent re-showing)
-    if (hasNoData) {
-      setPrevDayModalType('missing');
-      setShowPrevDayModal(true);
-    } else if (isStale) {
-      setPrevDayModalType('stale');
-      setShowPrevDayModal(true);
-    }
-  }, [currentUser, prevDayClose, prevDayRange, lastSavedDate]);
+    // Create a unique key for this data state
+    const dataStateKey = `${hasNoData ? 'missing' : isStale ? 'stale' : 'valid'}_${lastSavedDate || 'none'}`;
+    const sessionKey = `prevDayModalShown_${dataStateKey}`;
+    
+    // Check if we've already shown the modal for this data state in this session
+    const alreadyShown = sessionStorage.getItem(sessionKey) === 'true';
 
-  // Check on mount and when settings change
+    // Only show modal if data is missing or stale AND we haven't shown it for this state yet
+    if ((hasNoData || isStale) && !alreadyShown) {
+      setPrevDayModalType(hasNoData ? 'missing' : 'stale');
+      setShowPrevDayModal(true);
+      // Mark as shown for this data state
+      sessionStorage.setItem(sessionKey, 'true');
+    } else if (!hasNoData && !isStale) {
+      // If data is valid, clear any session flags
+      sessionStorage.removeItem(sessionKey);
+    }
+  }, [currentUser, prevDayClose, prevDayRange, lastSavedDate, settingsLoaded]);
+
+  // Check when settings are loaded or change
   useEffect(() => {
-    if (currentUser && (prevDayClose !== null || prevDayRange !== null || lastSavedDate !== null)) {
+    if (currentUser && settingsLoaded) {
       checkPrevDayData();
     }
-  }, [currentUser, prevDayClose, prevDayRange, lastSavedDate]);
-
-  // Check periodically and on route changes
-  useEffect(() => {
-    // Check immediately
-    if (currentUser) {
-      checkPrevDayData();
-    }
-
-    // Set up interval to check every 30 seconds
-    checkIntervalRef.current = setInterval(() => {
-      if (currentUser) {
-        checkPrevDayData();
-      }
-    }, 30000);
-
-    // Cleanup interval on unmount
-    return () => {
-      if (checkIntervalRef.current) {
-        clearInterval(checkIntervalRef.current);
-      }
-    };
-  }, [currentUser, location.pathname, checkPrevDayData]);
+  }, [currentUser, prevDayClose, prevDayRange, lastSavedDate, settingsLoaded, checkPrevDayData]);
 
   const handleLogout = async () => {
     try {

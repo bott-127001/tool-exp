@@ -64,13 +64,39 @@ function DirectionAsymmetry() {
     setSaveMsg('')
     try {
       const todayIso = new Date().toISOString().slice(0, 10)
+      const closeValue = prevDayClose === '' ? null : parseFloat(prevDayClose)
+      const rangeValue = prevDayRange === '' ? null : parseFloat(prevDayRange)
+      
       await axios.put(`/api/settings/${currentUser}`, {
-        prev_day_close: prevDayClose === '' ? null : parseFloat(prevDayClose),
-        prev_day_range: prevDayRange === '' ? null : parseFloat(prevDayRange),
+        prev_day_close: closeValue,
+        prev_day_range: rangeValue,
         prev_day_date: todayIso,
       })
+      
+      // Update local state immediately
       setLastSavedDate(todayIso)
+      // Ensure values are set correctly (handle empty strings)
+      if (closeValue !== null) {
+        setPrevDayClose(String(closeValue))
+      } else {
+        setPrevDayClose('')
+      }
+      if (rangeValue !== null) {
+        setPrevDayRange(String(rangeValue))
+      } else {
+        setPrevDayRange('')
+      }
+      
       setSaveMsg('Saved. New values will apply on next data poll.')
+      
+      // Clear any session storage flags so popup can re-evaluate
+      // The key will be different now since data state changed
+      Object.keys(sessionStorage).forEach(key => {
+        if (key.startsWith('prevDayModalShown_')) {
+          sessionStorage.removeItem(key)
+        }
+      })
+      
       setTimeout(() => setSaveMsg(''), 3000)
     } catch (err) {
       console.error('Failed to save previous-day inputs', err)
