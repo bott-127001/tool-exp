@@ -58,9 +58,20 @@ function Login() {
       justifyContent: 'center',
       alignItems: 'center',
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      padding: '20px',
+      boxSizing: 'border-box'
     }}>
-      <div className="card" style={{ minWidth: '400px', textAlign: 'center', padding: '30px' }}>
+      <div className="card" style={{
+        width: '100%',
+        maxWidth: '450px',
+        textAlign: 'center',
+        padding: '40px',
+        backgroundColor: 'white',
+        borderRadius: '8px',
+        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08)',
+        boxSizing: 'border-box'
+      }}>
         <h1 style={{ marginBottom: '30px', color: '#333' }}>
           NIFTY50 Options Signal System
         </h1>
