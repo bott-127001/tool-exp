@@ -12,7 +12,7 @@ And derives a daily directional state:
 - NEUTRAL
 """
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 def calculate_gap_and_acceptance(
@@ -173,7 +173,8 @@ def calculate_rea(
     """
     Range Extension Asymmetry (REA)
 
-    Define Initial Balance (IB) as first 60 minutes of the session.
+    Define Initial Balance (IB) as first X minutes of the session.
+    NOTE: Currently set to 5 minutes for testing. Change back to 60 minutes for production.
 
     IB_high, IB_low
     IB_range = IB_high - IB_low
@@ -186,12 +187,66 @@ def calculate_rea(
     if not intraday_prices:
         return None
 
-    # Split IB vs rest of day based on 60 minutes from session_start
-    ib_end = session_start + timedelta(minutes=60)
-    ib_prices = [p["price"] for p in intraday_prices if p["timestamp"] <= ib_end]
-    all_prices = [p["price"] for p in intraday_prices]
+    if session_start is None:
+        return None
+
+    # Ensure session_start is timezone-aware (assume UTC if not)
+    if session_start.tzinfo is None:
+        session_start = session_start.replace(tzinfo=timezone.utc)
+
+    # Split IB vs rest of day based on X minutes from session_start
+    # TODO: Change back to 60 minutes for production after testing
+    ib_minutes = 5  # Testing: 5 minutes. Production: 60 minutes
+    ib_end = session_start + timedelta(minutes=ib_minutes)
+    
+    # Ensure all timestamps are timezone-aware for comparison
+    ib_prices = []
+    all_prices = []
+    
+    for p in intraday_prices:
+        price = p.get("price")
+        if price is None:
+            continue
+        
+        all_prices.append(price)
+        
+        price_timestamp = p.get("timestamp")
+        if price_timestamp is None:
+            continue
+        
+        # Ensure timestamp is timezone-aware
+        if isinstance(price_timestamp, str):
+            # Try to parse if it's a string
+            try:
+                price_timestamp = datetime.fromisoformat(price_timestamp.replace('Z', '+00:00'))
+            except:
+                continue
+        
+        if price_timestamp.tzinfo is None:
+            price_timestamp = price_timestamp.replace(tzinfo=timezone.utc)
+        
+        # Compare timestamps (both should be timezone-aware now)
+        try:
+            if price_timestamp <= ib_end:
+                ib_prices.append(price)
+        except (TypeError, ValueError) as e:
+            # If comparison fails, log and skip
+            print(f"⚠️ REA: Timestamp comparison error: {e}, timestamp: {price_timestamp}, ib_end: {ib_end}")
+            continue
+
+    if len(all_prices) == 0:
+        print(f"⚠️ REA: No prices in price history. Total entries: {len(intraday_prices)}")
+        return None
 
     if len(ib_prices) == 0:
+        # Debug: log why IB prices are empty
+        if len(intraday_prices) > 0:
+            first_ts = intraday_prices[0].get("timestamp")
+            last_ts = intraday_prices[-1].get("timestamp") if len(intraday_prices) > 1 else first_ts
+            print(f"⚠️ REA: No prices in IB window (first {ib_minutes} min). Session start: {session_start}, IB end: {ib_end}, First price ts: {first_ts}, Last price ts: {last_ts}, Total prices: {len(intraday_prices)}, All prices count: {len(all_prices)}")
+        return None
+
+    if len(all_prices) == 0:
         return None
 
     ib_high = max(ib_prices)

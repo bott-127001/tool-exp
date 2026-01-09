@@ -343,7 +343,7 @@ function DirectionAsymmetry() {
                         ? rea.ib_high.toFixed(2)
                         : 'N/A'}
                     </td>
-                    <td>Initial Balance High (first 60 minutes)</td>
+                    <td>Initial Balance High (first 5 minutes - testing)</td>
                   </tr>
                   <tr>
                     <td>
@@ -354,7 +354,7 @@ function DirectionAsymmetry() {
                         ? rea.ib_low.toFixed(2)
                         : 'N/A'}
                     </td>
-                    <td>Initial Balance Low (first 60 minutes)</td>
+                    <td>Initial Balance Low (first 5 minutes - testing)</td>
                   </tr>
                   <tr>
                     <td>
