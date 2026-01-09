@@ -198,13 +198,14 @@ function Layout() {
         </button>
         <div className={`nav-links ${isMenuOpen ? 'nav-links-open' : ''}`}>
           <Link to="/dashboard" onClick={closeMenu}>Dashboard</Link>
-          <Link to="/rules" onClick={closeMenu}>Rules</Link>
+          <Link to="/volatility-permission" onClick={closeMenu}>Volatility</Link>
+          <Link to="/direction-asymmetry" onClick={closeMenu}>Direction</Link>
           <Link to="/greeks" onClick={closeMenu}>Greeks</Link>
-          <Link to="/volatility-permission" onClick={closeMenu}>Volatility Permission</Link>
-          <Link to="/direction-asymmetry" onClick={closeMenu}>Direction & Asymmetry</Link>
+          <Link to="/option-chain" onClick={closeMenu}>Option Chain</Link>
+          <Link to="/rules" onClick={closeMenu}>Rules</Link>
           <Link to="/settings" onClick={closeMenu}>Settings</Link>
           <Link to="/logs" onClick={closeMenu}>Trade Logs</Link>
-          <Link to="/option-chain" onClick={closeMenu}>Option Chain</Link>
+          
         </div>
         <div className="nav-right">
           <span className={`status-indicator ${connected ? 'status-online' : 'status-offline'}`}></span>
