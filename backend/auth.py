@@ -389,13 +389,20 @@ async def frontend_login(request: Request):
         username = body.get("username")
         password = body.get("password")
         
+        print(f"🔐 Frontend login attempt - Username: {username}")
+        
         if not username or not password:
+            print(f"❌ Missing username or password")
             raise HTTPException(status_code=400, detail="Username and password required")
         
         # Verify credentials
+        print(f"🔍 Verifying credentials for {username}...")
         user = await verify_frontend_user(username, password)
         if not user:
+            print(f"❌ Invalid credentials for {username}")
             raise HTTPException(status_code=401, detail="Invalid username or password")
+        
+        print(f"✅ Credentials verified for {username}")
         
         # Create session token
         session_token = secrets.token_urlsafe(32)

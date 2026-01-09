@@ -15,22 +15,29 @@ function Login() {
     setLoading(true)
 
     try {
+      console.log('🔐 Attempting login for:', username)
       const response = await axios.post('/api/auth/frontend-login', {
         username,
         password
       })
 
-      if (response.data.success) {
+      console.log('📥 Login response:', response.data)
+
+      if (response.data && response.data.success) {
         // Store session token
         localStorage.setItem('session_token', response.data.session_token)
         localStorage.setItem('currentUser', response.data.username)
         
+        console.log('✅ Login successful, redirecting to dashboard...')
         // Redirect to dashboard
-        navigate('/dashboard')
+        navigate('/dashboard', { replace: true })
       } else {
+        console.log('❌ Login failed - no success flag')
         setError('Login failed. Please check your credentials.')
       }
     } catch (err) {
+      console.error('❌ Login error:', err)
+      console.error('❌ Error response:', err.response?.data)
       setError(err.response?.data?.detail || 'Login failed. Please try again.')
     } finally {
       setLoading(false)
