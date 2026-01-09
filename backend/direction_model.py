@@ -295,15 +295,45 @@ def calculate_rea(
     if ib_range <= 0:
         return None
 
+    # Calculate current day high and low from ALL prices collected so far
+    # This represents the day's high/low up to the current moment (not just IB window)
     day_high = max(all_prices)
     day_low = min(all_prices)
+    
+    # Check if we have prices outside the IB window
+    # If we only have IB window data, we can't calculate meaningful RE Up/Down yet
+    has_data_outside_ib = len(all_prices) > len(ib_prices)
+    
+    print(f"ℹ️ REA: IB High: {ib_high}, IB Low: {ib_low}, Current Day High: {day_high}, Current Day Low: {day_low}, IB prices: {len(ib_prices)}, All prices: {len(all_prices)}, Has data outside IB: {has_data_outside_ib}")
 
+    # Calculate RE Up and RE Down
+    # RE Up = Day High - IB High (how much price extended above IB)
+    # RE Down = IB Low - Day Low (how much price extended below IB)
     re_up = max(0.0, day_high - ib_high)
     re_down = max(0.0, ib_low - day_low)
+    
+    # Calculate REA only if we have data outside IB window
+    # If we only have IB data, return None for RE Up/Down/REA (frontend will show N/A)
+    if not has_data_outside_ib:
+        print(f"ℹ️ REA: Only IB window data available ({len(ib_prices)} prices). RE Up/Down/REA will be None until data outside IB window is collected.")
+        return {
+            "ib_high": ib_high,
+            "ib_low": ib_low,
+            "ib_range": ib_range,
+            "day_high": day_high,
+            "day_low": day_low,
+            "re_up": None,  # Show N/A until we have data outside IB
+            "re_down": None,  # Show N/A until we have data outside IB
+            "rea": None,  # Show N/A until we have data outside IB
+        }
+    
+    # Calculate REA when we have data outside IB window
+    if ib_range > 0:
+        rea = (re_up - re_down) / ib_range
+    else:
+        rea = 0.0
 
-    rea = (re_up - re_down) / ib_range
-
-    print(f"✅ REA: Calculated successfully. IB High: {ib_high}, IB Low: {ib_low}, IB Range: {ib_range}, RE Up: {re_up}, RE Down: {re_down}, REA: {rea}, IB prices count: {len(ib_prices)}")
+    print(f"✅ REA: Calculated successfully. IB High: {ib_high}, IB Low: {ib_low}, IB Range: {ib_range}, Day High: {day_high}, Day Low: {day_low}, RE Up: {re_up}, RE Down: {re_down}, REA: {rea}, IB prices count: {len(ib_prices)}, All prices count: {len(all_prices)}")
 
     return {
         "ib_high": ib_high,

@@ -376,7 +376,7 @@ function DirectionAsymmetry() {
                         ? rea.re_up.toFixed(2)
                         : 'N/A'}
                     </td>
-                    <td>Day High - IB High</td>
+                    <td>Current Day High - IB High (shows N/A until data outside IB window)</td>
                   </tr>
                   <tr>
                     <td>
@@ -387,7 +387,7 @@ function DirectionAsymmetry() {
                         ? rea.re_down.toFixed(2)
                         : 'N/A'}
                     </td>
-                    <td>IB Low - Day Low</td>
+                    <td>IB Low - Current Day Low (shows N/A until data outside IB window)</td>
                   </tr>
                   <tr>
                     <td>
@@ -398,7 +398,7 @@ function DirectionAsymmetry() {
                         ? rea.rea.toFixed(2)
                         : 'N/A'}
                     </td>
-                    <td>(RE Up - RE Down) / IB Range</td>
+                    <td>(RE Up - RE Down) / IB Range (shows N/A until data outside IB window)</td>
                   </tr>
                 </tbody>
               </table>
