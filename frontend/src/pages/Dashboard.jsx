@@ -92,40 +92,8 @@ function Dashboard() {
         )}
       </div>
 
-      {/* Direction & Asymmetry State Card */}
-      <div className="card" style={{ marginTop: '20px' }}>
-        <h2>Direction</h2>
-        {hasData && Object.keys(directionData).length > 0 ? (
-          <div style={{
-            padding: '20px',
-            marginTop: '15px',
-            borderRadius: '8px',
-            border: `2px solid ${getDirectionalColor(directionalState)}`,
-            backgroundColor: getDirectionalColor(directionalState) + '20',
-            textAlign: 'center',
-          }}>
-            <h3 style={{
-              color: getDirectionalColor(directionalState),
-              margin: '10px 0',
-              fontSize: '28px',
-            }}>
-              {getDirectionalLabel(directionalState)}
-            </h3>
-            <p style={{
-              fontSize: '16px',
-              marginTop: '10px',
-              color: '#333',
-            }}>
-              {directionalInfo.reason || 'Waiting for directional assessment...'}
-            </p>
-          </div>
-        ) : (
-          <p>Waiting for direction & asymmetry data...</p>
-        )}
-      </div>
-
-      {/* Volatility Permission State Card */}
-      <div className="card" style={{ marginTop: '20px' }}>
+            {/* Volatility Permission State Card */}
+            <div className="card" style={{ marginTop: '20px' }}>
         <h2>Volatility</h2>
         {hasData && market_state ? (
           <div style={{
@@ -164,6 +132,38 @@ function Dashboard() {
           </div>
         ) : (
           <p>Waiting for volatility permission data...</p>
+        )}
+      </div>
+
+      {/* Direction & Asymmetry State Card */}
+      <div className="card" style={{ marginTop: '20px' }}>
+        <h2>Direction</h2>
+        {hasData && Object.keys(directionData).length > 0 ? (
+          <div style={{
+            padding: '20px',
+            marginTop: '15px',
+            borderRadius: '8px',
+            border: `2px solid ${getDirectionalColor(directionalState)}`,
+            backgroundColor: getDirectionalColor(directionalState) + '20',
+            textAlign: 'center',
+          }}>
+            <h3 style={{
+              color: getDirectionalColor(directionalState),
+              margin: '10px 0',
+              fontSize: '28px',
+            }}>
+              {getDirectionalLabel(directionalState)}
+            </h3>
+            <p style={{
+              fontSize: '16px',
+              marginTop: '10px',
+              color: '#333',
+            }}>
+              {directionalInfo.reason || 'Waiting for directional assessment...'}
+            </p>
+          </div>
+        ) : (
+          <p>Waiting for direction & asymmetry data...</p>
         )}
       </div>
 
