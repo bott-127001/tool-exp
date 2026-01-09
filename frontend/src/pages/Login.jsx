@@ -1,9 +1,11 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { useAuth } from './AuthContext'
 
 function Login() {
   const navigate = useNavigate()
+  const { checkAuth } = useAuth()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -11,11 +13,13 @@ function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    console.log('🚀 FORM SUBMITTED!', { username, password: '***' })
     setError('')
     setLoading(true)
 
     try {
       console.log('🔐 Attempting login for:', username)
+      console.log('🌐 Making request to /api/auth/frontend-login')
       const response = await axios.post('/api/auth/frontend-login', {
         username,
         password
@@ -28,7 +32,11 @@ function Login() {
         localStorage.setItem('session_token', response.data.session_token)
         localStorage.setItem('currentUser', response.data.username)
         
-        console.log('✅ Login successful, redirecting to dashboard...')
+        console.log('✅ Login successful, refreshing auth state...')
+        // Refresh auth context to update currentUser
+        await checkAuth()
+        
+        console.log('✅ Auth refreshed, redirecting to dashboard...')
         // Redirect to dashboard
         navigate('/dashboard', { replace: true })
       } else {
