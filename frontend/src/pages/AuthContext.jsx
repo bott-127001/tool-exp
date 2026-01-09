@@ -12,30 +12,38 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    let attempts = 0;
-    const maxAttempts = 10;
-    const delay = 500;
-
     const checkAuth = async () => {
-      attempts++;
       try {
-        const response = await axios.get('/api/auth/current-user');
-        if (response.data && response.data.user) {
-          setCurrentUser(response.data.user);
-          localStorage.setItem('currentUser', response.data.user); // Keep for legacy/debug if needed
+        const sessionToken = localStorage.getItem('session_token');
+        if (!sessionToken) {
+          setCurrentUser(null);
           setIsLoading(false);
           return;
         }
-      } catch (error) {
-        console.error(`[AuthContext] Auth check attempt ${attempts} failed:`, error);
-      }
 
-      if (attempts < maxAttempts) {
-        setTimeout(checkAuth, delay);
-      } else {
-        console.log('[AuthContext] Max attempts reached. User not authenticated.');
-        setCurrentUser(null);
+        // Check frontend authentication
+        const response = await axios.get('/api/auth/frontend-check', {
+          headers: {
+            'Authorization': `Bearer ${sessionToken}`
+          }
+        });
+
+        if (response.data && response.data.authenticated) {
+          setCurrentUser(response.data.username);
+          localStorage.setItem('currentUser', response.data.username);
+        } else {
+          // Session invalid, clear it
+          localStorage.removeItem('session_token');
+          localStorage.removeItem('currentUser');
+          setCurrentUser(null);
+        }
+      } catch (error) {
+        console.error('[AuthContext] Auth check failed:', error);
+        // Clear invalid session
+        localStorage.removeItem('session_token');
         localStorage.removeItem('currentUser');
+        setCurrentUser(null);
+      } finally {
         setIsLoading(false);
       }
     };
@@ -44,9 +52,22 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = async () => {
-    await axios.post('/api/auth/logout');
-    setCurrentUser(null);
-    localStorage.removeItem('currentUser');
+    try {
+      const sessionToken = localStorage.getItem('session_token');
+      if (sessionToken) {
+        await axios.post('/api/auth/frontend-logout', {}, {
+          headers: {
+            'Authorization': `Bearer ${sessionToken}`
+          }
+        });
+      }
+    } catch (error) {
+      console.error('[AuthContext] Logout error:', error);
+    } finally {
+      localStorage.removeItem('session_token');
+      localStorage.removeItem('currentUser');
+      setCurrentUser(null);
+    }
   };
 
   const value = { currentUser, isLoading, logout };
