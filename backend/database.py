@@ -41,7 +41,7 @@ async def init_db():
 
     # Initialize frontend users
     await init_frontend_users()
-    
+
     # Initialize default settings for known users
     for user in ["samarth", "prajwal"]:
         default_settings = {
@@ -260,6 +260,11 @@ async def init_frontend_users():
     import bcrypt
     
     for user in ["samarth", "prajwal"]:
+        # Check if user exists
+        existing = await frontend_users_collection.find_one({"username": user})
+        if existing:
+            continue
+        
         # Get password from environment
         password_env_key = f"FRONTEND_{user.upper()}_PASSWORD"
         password = os.getenv(password_env_key)
@@ -267,13 +272,6 @@ async def init_frontend_users():
         if not password:
             print(f"⚠️  Warning: {password_env_key} not set in .env. Frontend user '{user}' will not be created.")
             print(f"   Set {password_env_key}=your_password in .env to create this user.")
-            continue
-        
-        # Check if user exists
-        existing = await frontend_users_collection.find_one({"username": user})
-        
-        if existing:
-            # User already exists, skip
             continue
         
         # Hash and create user using upsert to avoid race conditions with multiple workers
@@ -290,7 +288,6 @@ async def init_frontend_users():
             },
             upsert=True
         )
-        
-        # Only print if we actually inserted (not updated)
         if result.upserted_id:
             print(f"✅ Created frontend user: {user}")
+        # If user already exists, silently skip (no error)
