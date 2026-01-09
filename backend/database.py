@@ -260,11 +260,6 @@ async def init_frontend_users():
     import bcrypt
     
     for user in ["samarth", "prajwal"]:
-        # Check if user exists
-        existing = await frontend_users_collection.find_one({"username": user})
-        if existing:
-            continue
-        
         # Get password from environment
         password_env_key = f"FRONTEND_{user.upper()}_PASSWORD"
         password = os.getenv(password_env_key)
@@ -274,12 +269,28 @@ async def init_frontend_users():
             print(f"   Set {password_env_key}=your_password in .env to create this user.")
             continue
         
-        # Hash and create user
+        # Check if user exists
+        existing = await frontend_users_collection.find_one({"username": user})
+        
+        if existing:
+            # User already exists, skip
+            continue
+        
+        # Hash and create user using upsert to avoid race conditions with multiple workers
         password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        await frontend_users_collection.insert_one({
-            "username": user,
-            "password_hash": password_hash,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        })
-        print(f"✅ Created frontend user: {user}")
+        result = await frontend_users_collection.update_one(
+            {"username": user},
+            {
+                "$setOnInsert": {
+                    "username": user,
+                    "password_hash": password_hash,
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+            },
+            upsert=True
+        )
+        
+        # Only print if we actually inserted (not updated)
+        if result.upserted_id:
+            print(f"✅ Created frontend user: {user}")
