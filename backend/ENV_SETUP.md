@@ -97,6 +97,39 @@ UPSTOX_REDIRECT_URI=http://localhost:8000/auth/callback
 - Make sure the `.env` file is in the `backend` directory
 - Make sure the filename is exactly `.env` (not `env.txt` or `.env.txt`)
 
+## Step 6: Add Upstox Login Credentials (for Automated OAuth)
+
+For automated daily OAuth login, add these credentials:
+
+```env
+# Phone number used to login to Upstox
+UPSTOX_SAMARTH_PHONE=your_samarth_phone_number
+# TOTP secret (base32 encoded) from your authenticator app
+UPSTOX_SAMARTH_TOTP_SECRET=your_samarth_totp_base32_secret
+# 6-digit Upstox PIN
+UPSTOX_SAMARTH_PIN=123456
+
+UPSTOX_PRAJWAL_PHONE=your_prajwal_phone_number
+UPSTOX_PRAJWAL_TOTP_SECRET=your_prajwal_totp_base32_secret
+UPSTOX_PRAJWAL_PIN=123456
+```
+
+**Getting TOTP Secret:**
+- Extract the base32 secret from your authenticator app (Google Authenticator, Authy, etc.)
+- You may need to use a QR code scanner or app settings to get the raw secret
+- The secret should be a base32-encoded string
+
+## Step 7: Add Frontend Dashboard Passwords
+
+For frontend dashboard access (separate from Upstox):
+
+```env
+FRONTEND_SAMARTH_PASSWORD=your_secure_password
+FRONTEND_PRAJWAL_PASSWORD=your_secure_password
+```
+
+These passwords will be hashed automatically on first run. Choose strong passwords for security.
+
 ## Security Note
 
 ⚠️ **NEVER commit your `.env` file to Git!** It contains sensitive credentials. The `.gitignore` file already excludes `.env` files, but always double-check before committing.

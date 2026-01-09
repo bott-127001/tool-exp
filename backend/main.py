@@ -34,13 +34,19 @@ async def lifespan(app: FastAPI):
     # Start background polling task (will wait for authentication)
     polling_task = asyncio.create_task(start_polling()) # The worker will use the global manager
     
+    # Start automated token refresh scheduler (runs daily at 9:15 AM IST)
+    from auto_auth import daily_token_refresh_scheduler
+    token_refresh_task = asyncio.create_task(daily_token_refresh_scheduler())
+    
     yield
     
     # Shutdown
     await stop_polling()
     polling_task.cancel()
+    token_refresh_task.cancel()
     try:
         await polling_task
+        await token_refresh_task
     except asyncio.CancelledError:
         pass
 

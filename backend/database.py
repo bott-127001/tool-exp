@@ -20,6 +20,7 @@ users_collection = db.get_collection("users")
 settings_collection = db.get_collection("user_settings")
 trade_logs_collection = db.get_collection("trade_logs")
 market_data_log_collection = db.get_collection("market_data_log")
+frontend_users_collection = db.get_collection("frontend_users")
 
 async def init_db():
     """Initialize database indexes and default settings."""
@@ -36,7 +37,11 @@ async def init_db():
     await settings_collection.create_index("username", unique=True)
     await trade_logs_collection.create_index([("username", 1), ("timestamp", -1)])
     await market_data_log_collection.create_index("timestamp")
+    await frontend_users_collection.create_index("username", unique=True)
 
+    # Initialize frontend users
+    await init_frontend_users()
+    
     # Initialize default settings for known users
     for user in ["samarth", "prajwal"]:
         default_settings = {
@@ -181,3 +186,100 @@ async def clear_user_tokens(username: str):
             "token_expires_at": None
         }}
     )
+
+
+# Frontend user management (separate from Upstox OAuth)
+async def create_frontend_user(username: str, password: str) -> bool:
+    """
+    Create a frontend user with hashed password.
+    Returns True if created successfully, False if user already exists.
+    """
+    import bcrypt
+    
+    # Check if user already exists
+    existing = await frontend_users_collection.find_one({"username": username})
+    if existing:
+        return False
+    
+    # Hash password
+    password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    
+    # Create user
+    await frontend_users_collection.insert_one({
+        "username": username,
+        "password_hash": password_hash,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow()
+    })
+    
+    return True
+
+
+async def verify_frontend_user(username: str, password: str) -> Optional[Dict]:
+    """
+    Verify frontend user credentials.
+    Returns user dict if valid, None otherwise.
+    """
+    import bcrypt
+    
+    user = await frontend_users_collection.find_one({"username": username})
+    if not user:
+        return None
+    
+    # Verify password
+    password_hash = user.get("password_hash")
+    if not password_hash:
+        return None
+    
+    if bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8')):
+        return {
+            "username": user["username"],
+            "created_at": user.get("created_at")
+        }
+    
+    return None
+
+
+async def get_frontend_user(username: str) -> Optional[Dict]:
+    """Get frontend user by username."""
+    user = await frontend_users_collection.find_one({"username": username})
+    if user:
+        return {
+            "username": user["username"],
+            "created_at": user.get("created_at")
+        }
+    return None
+
+
+async def init_frontend_users():
+    """
+    Initialize default frontend users (samarth, prajwal) if they don't exist.
+    Passwords should be set in environment variables.
+    """
+    import os
+    import bcrypt
+    
+    for user in ["samarth", "prajwal"]:
+        # Check if user exists
+        existing = await frontend_users_collection.find_one({"username": user})
+        if existing:
+            continue
+        
+        # Get password from environment
+        password_env_key = f"FRONTEND_{user.upper()}_PASSWORD"
+        password = os.getenv(password_env_key)
+        
+        if not password:
+            print(f"⚠️  Warning: {password_env_key} not set in .env. Frontend user '{user}' will not be created.")
+            print(f"   Set {password_env_key}=your_password in .env to create this user.")
+            continue
+        
+        # Hash and create user
+        password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        await frontend_users_collection.insert_one({
+            "username": user,
+            "password_hash": password_hash,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        })
+        print(f"✅ Created frontend user: {user}")

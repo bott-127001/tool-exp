@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Query, HTTPException, Request
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 import httpx
 import os
+import secrets
 from typing import Optional
 from urllib.parse import urlencode
 from dotenv import load_dotenv
-from database import store_tokens, get_user_tokens, clear_user_tokens
+from database import store_tokens, get_user_tokens, clear_user_tokens, verify_frontend_user, create_frontend_user
 
 # Load environment variables from .env file
 load_dotenv()
@@ -370,3 +371,114 @@ async def refresh_access_token(username: str) -> Optional[str]:
     await store_tokens(username, new_access_token, user_tokens["refresh_token"], new_expires_at)
     print(f"✅ Token refreshed successfully for {username}")
     return new_access_token
+
+
+# Frontend authentication (separate from Upstox OAuth)
+# Store active frontend sessions in memory (or use Redis in production)
+frontend_sessions: dict[str, dict] = {}  # {session_token: {username, expires_at}}
+
+
+@auth_router.post("/frontend-login")
+async def frontend_login(request: Request):
+    """
+    Frontend dashboard login - separate from Upstox OAuth.
+    Verifies username/password and returns session token.
+    """
+    try:
+        body = await request.json()
+        username = body.get("username")
+        password = body.get("password")
+        
+        if not username or not password:
+            raise HTTPException(status_code=400, detail="Username and password required")
+        
+        # Verify credentials
+        user = await verify_frontend_user(username, password)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+        
+        # Create session token
+        session_token = secrets.token_urlsafe(32)
+        import time
+        expires_at = time.time() + (24 * 60 * 60)  # 24 hours
+        
+        frontend_sessions[session_token] = {
+            "username": username,
+            "expires_at": expires_at
+        }
+        
+        print(f"✅ Frontend login successful for {username}")
+        return JSONResponse(content={
+            "success": True,
+            "session_token": session_token,
+            "username": username
+        })
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Frontend login error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Login failed")
+
+
+@auth_router.post("/frontend-logout")
+async def frontend_logout(request: Request):
+    """Logout frontend user by clearing session"""
+    try:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            session_token = auth_header.split("Bearer ")[1]
+            if session_token in frontend_sessions:
+                username = frontend_sessions[session_token]["username"]
+                del frontend_sessions[session_token]
+                print(f"✅ Frontend logout successful for {username}")
+                return JSONResponse(content={"success": True, "message": "Logged out"})
+        
+        return JSONResponse(content={"success": True, "message": "No active session"})
+    except Exception as e:
+        print(f"❌ Frontend logout error: {str(e)}")
+        return JSONResponse(content={"success": True, "message": "Logout completed"})
+
+
+@auth_router.get("/frontend-check")
+async def frontend_check(request: Request):
+    """Check if frontend user is authenticated"""
+    try:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return JSONResponse(content={"authenticated": False})
+        
+        session_token = auth_header.split("Bearer ")[1]
+        
+        if session_token in frontend_sessions:
+            session = frontend_sessions[session_token]
+            import time
+            if session["expires_at"] > time.time():
+                return JSONResponse(content={
+                    "authenticated": True,
+                    "username": session["username"]
+                })
+            else:
+                # Session expired, remove it
+                del frontend_sessions[session_token]
+        
+        return JSONResponse(content={"authenticated": False})
+    except Exception as e:
+        print(f"❌ Frontend check error: {str(e)}")
+        return JSONResponse(content={"authenticated": False})
+
+
+def get_frontend_user_from_token(session_token: Optional[str]) -> Optional[str]:
+    """Helper function to get username from session token"""
+    if not session_token:
+        return None
+    
+    if session_token in frontend_sessions:
+        session = frontend_sessions[session_token]
+        import time
+        if session["expires_at"] > time.time():
+            return session["username"]
+        else:
+            del frontend_sessions[session_token]
+    
+    return None
