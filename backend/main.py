@@ -1,6 +1,6 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 from contextlib import asynccontextmanager
@@ -205,10 +205,22 @@ async def get_trade_logs(user: str):
 
 
 @app.api_route("/health-check", methods=["GET", "HEAD"])
-async def health_check():
-    """Endpoint for uptime monitoring to prevent the service from spinning down."""
+async def health_check(request: Request):
+    """
+    Endpoint for uptime monitoring to prevent the service from spinning down.
+    This endpoint is publicly accessible (no authentication required) and supports both GET and HEAD requests.
+    HEAD requests return a 200 status with no body, which is required for UptimeRobot monitoring.
+    """
     # print("Health check ping received.")  # Good for debugging
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+    response_data = {"status": "ok", "timestamp": datetime.now().isoformat()}
+    
+    # For HEAD requests, return response with no body (status 200)
+    # This is required for proper HTTP HEAD request handling
+    if request.method == "HEAD":
+        return Response(status_code=200)
+    
+    # For GET requests, return JSON response
+    return response_data
 
 
 @app.get("/api/export-data")
