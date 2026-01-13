@@ -606,13 +606,13 @@ async def trigger_upstox_login(request: Request):
         print(f"🤖 Manual Upstox login triggered for {username}")
         
         # Import and call automated login
-        from auto_auth import selenium_executor, _run_selenium_login_sync
+        from auto_auth import get_selenium_executor, _run_selenium_login_sync
         from data_fetcher import enable_polling
         
         # Run Selenium in thread pool to prevent worker timeout in production
         loop = asyncio.get_event_loop()
         success = await loop.run_in_executor(
-            selenium_executor,
+            get_selenium_executor(),
             _run_selenium_login_sync,
             username
         )

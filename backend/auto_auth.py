@@ -19,9 +19,18 @@ import concurrent.futures
 
 load_dotenv()
 
-# Create a thread pool executor for Selenium operations (prevents worker timeout in production)
-# This runs blocking Selenium operations in separate threads so they don't block the async event loop
-selenium_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="selenium")
+# Thread pool executor - created lazily to avoid startup issues
+_selenium_executor = None
+
+def get_selenium_executor():
+    """Get thread pool executor for Selenium operations."""
+    global _selenium_executor
+    if _selenium_executor is None:
+        _selenium_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2, 
+            thread_name_prefix="selenium"
+        )
+    return _selenium_executor
 
 # TOTP secrets from environment (base32 encoded)
 TOTP_SECRETS = {
@@ -333,7 +342,7 @@ async def daily_token_refresh_scheduler():
             
             # Target time: 9:15 AM IST (03:45 UTC)
             target_hour = 1
-            target_minute = 20
+            target_minute = 25
 
             
             # Calculate next refresh time
@@ -371,7 +380,7 @@ async def daily_token_refresh_scheduler():
                     # Selenium operations are blocking, so we run them in a separate thread
                     loop = asyncio.get_event_loop()
                     success = await loop.run_in_executor(
-                        selenium_executor,
+                        get_selenium_executor(),
                         _run_selenium_login_sync,
                         user
                     )
