@@ -333,8 +333,8 @@ async def daily_token_refresh_scheduler():
             
             # Target time: 9:15 AM IST (03:45 UTC)
             target_hour = 01
-            target_minute = 10
-            
+            target_minute = 20
+
             
             # Calculate next refresh time
             if now_ist.hour < target_hour or (now_ist.hour == target_hour and now_ist.minute < target_minute):
