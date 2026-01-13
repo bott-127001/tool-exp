@@ -66,7 +66,7 @@ async def automated_oauth_login(user: str) -> Optional[str]:
     
     # Setup Chrome in headless mode
     chrome_options = Options()
-    # chrome_options.add_argument("--headless")  # Run in background
+    chrome_options.add_argument("--headless")  # Run in background
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
@@ -331,6 +331,15 @@ async def daily_token_refresh_scheduler():
             
             # Wait until refresh time
             await asyncio.sleep(wait_seconds)
+            
+            # Check if it's a weekend before attempting login
+            now_utc_after_wait = datetime.now(timezone.utc)
+            now_ist_after_wait = now_utc_after_wait + timedelta(hours=5, minutes=30)
+            
+            # Skip weekends (Saturday=5, Sunday=6)
+            if now_ist_after_wait.weekday() >= 5:
+                print(f"📅 Weekend detected ({now_ist_after_wait.strftime('%A')}). Skipping token refresh.")
+                continue
             
             # Refresh tokens for all users
             print(f"\n🔄 Starting daily token refresh at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")

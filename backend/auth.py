@@ -489,3 +489,146 @@ def get_frontend_user_from_token(session_token: Optional[str]) -> Optional[str]:
             del frontend_sessions[session_token]
     
     return None
+
+
+@auth_router.get("/check-upstox-login-status")
+async def check_upstox_login_status(request: Request):
+    """
+    Check if Upstox login happened today for the current frontend user.
+    Returns whether login happened today and if token is valid.
+    """
+    try:
+        # Get current frontend user
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        
+        session_token = auth_header.split("Bearer ")[1]
+        username = get_frontend_user_from_token(session_token)
+        
+        if not username:
+            raise HTTPException(status_code=401, detail="Invalid session")
+        
+        # Get Upstox tokens for this user
+        tokens = await get_user_tokens(username)
+        
+        if not tokens or not tokens.get("access_token"):
+            return JSONResponse(content={
+                "logged_in_today": False,
+                "has_token": False,
+                "token_valid": False,
+                "message": "No Upstox login found"
+            })
+        
+        # Check if token was updated today
+        from datetime import datetime, timezone, timedelta
+        import time
+        
+        updated_at = tokens.get("updated_at")
+        has_token = True
+        token_valid = False
+        logged_in_today = False
+        
+        if updated_at:
+            # Convert to IST for comparison
+            try:
+                if isinstance(updated_at, datetime):
+                    # If it's timezone-aware, convert to UTC first, then to IST
+                    if updated_at.tzinfo is not None:
+                        updated_utc = updated_at.astimezone(timezone.utc)
+                    else:
+                        # Assume it's UTC if naive
+                        updated_utc = updated_at.replace(tzinfo=timezone.utc)
+                    updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+                else:
+                    # If it's a string or other format, try to parse
+                    updated_dt = datetime.fromisoformat(str(updated_at).replace('Z', '+00:00'))
+                    if updated_dt.tzinfo is None:
+                        updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                    updated_utc = updated_dt.astimezone(timezone.utc)
+                    updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+                
+                now_utc = datetime.now(timezone.utc)
+                now_ist = now_utc + timedelta(hours=5, minutes=30)
+                
+                # Check if updated today (same date in IST)
+                logged_in_today = (
+                    updated_ist.date() == now_ist.date()
+                )
+            except Exception as e:
+                # If parsing fails, assume not logged in today
+                print(f"⚠️ Error parsing updated_at: {e}")
+                logged_in_today = False
+        
+        # Check if token is still valid (not expired)
+        expires_at = tokens.get("token_expires_at")
+        if expires_at:
+            token_valid = expires_at > time.time()
+        
+        return JSONResponse(content={
+            "logged_in_today": logged_in_today,
+            "has_token": has_token,
+            "token_valid": token_valid,
+            "updated_at": updated_at.isoformat() if updated_at else None,
+            "message": "Logged in today" if logged_in_today else "Not logged in today"
+        })
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error checking Upstox login status: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Error checking login status")
+
+
+@auth_router.post("/trigger-upstox-login")
+async def trigger_upstox_login(request: Request):
+    """
+    Manually trigger automated Upstox login for the current frontend user.
+    """
+    try:
+        # Get current frontend user
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        
+        session_token = auth_header.split("Bearer ")[1]
+        username = get_frontend_user_from_token(session_token)
+        
+        if not username:
+            raise HTTPException(status_code=401, detail="Invalid session")
+        
+        if username not in ["samarth", "prajwal"]:
+            raise HTTPException(status_code=400, detail="Invalid user for Upstox login")
+        
+        print(f"🤖 Manual Upstox login triggered for {username}")
+        
+        # Import and call automated login
+        from auto_auth import automated_oauth_login
+        from data_fetcher import enable_polling
+        
+        success = await automated_oauth_login(username)
+        
+        if success:
+            # Enable polling after successful login
+            enable_polling()
+            print(f"✅ Manual Upstox login successful for {username}")
+            return JSONResponse(content={
+                "success": True,
+                "message": f"Upstox login successful for {username}"
+            })
+        else:
+            print(f"❌ Manual Upstox login failed for {username}")
+            return JSONResponse(content={
+                "success": False,
+                "message": f"Upstox login failed for {username}. Check backend logs for details."
+            }, status_code=500)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error triggering Upstox login: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error triggering login: {str(e)}")

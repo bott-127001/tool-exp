@@ -1,8 +1,14 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { useData } from './DataContext'
+import { useAuth } from './AuthContext'
+import axios from 'axios'
 
 function Dashboard() {
   const { data } = useData()
+  const { currentUser } = useAuth()
+  const [upstoxLoginStatus, setUpstoxLoginStatus] = useState(null)
+  const [triggeringLogin, setTriggeringLogin] = useState(false)
+  const [loginMessage, setLoginMessage] = useState('')
 
   const getTickCross = (match) => {
     return match ? <span className="tick">✓</span> : <span className="cross">✗</span>
@@ -68,12 +74,140 @@ function Dashboard() {
     }
   }
 
+  // Check Upstox login status on mount and when user changes
+  useEffect(() => {
+    const checkUpstoxLoginStatus = async () => {
+      if (!currentUser) return
+      
+      try {
+        const sessionToken = localStorage.getItem('session_token')
+        if (!sessionToken) return
+        
+        const response = await axios.get('/api/auth/check-upstox-login-status', {
+          headers: {
+            'Authorization': `Bearer ${sessionToken}`
+          }
+        })
+        
+        setUpstoxLoginStatus(response.data)
+      } catch (error) {
+        console.error('Error checking Upstox login status:', error)
+        setUpstoxLoginStatus({
+          logged_in_today: false,
+          has_token: false,
+          token_valid: false,
+          message: 'Error checking status'
+        })
+      }
+    }
+    
+    checkUpstoxLoginStatus()
+    // Check every 5 minutes
+    const interval = setInterval(checkUpstoxLoginStatus, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [currentUser])
+
+  const handleTriggerUpstoxLogin = async () => {
+    setTriggeringLogin(true)
+    setLoginMessage('')
+    
+    try {
+      const sessionToken = localStorage.getItem('session_token')
+      if (!sessionToken) {
+        setLoginMessage('Not authenticated. Please login again.')
+        setTriggeringLogin(false)
+        return
+      }
+      
+      const response = await axios.post('/api/auth/trigger-upstox-login', {}, {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        }
+      })
+      
+      if (response.data.success) {
+        setLoginMessage('✅ Upstox login initiated successfully! Please wait a moment...')
+        // Refresh status after a delay
+        setTimeout(async () => {
+          try {
+            const statusResponse = await axios.get('/api/auth/check-upstox-login-status', {
+              headers: {
+                'Authorization': `Bearer ${sessionToken}`
+              }
+            })
+            setUpstoxLoginStatus(statusResponse.data)
+          } catch (error) {
+            console.error('Error refreshing status:', error)
+          }
+        }, 10000) // Wait 10 seconds for login to complete
+      } else {
+        setLoginMessage('❌ Login failed. Check backend logs for details.')
+      }
+    } catch (error) {
+      console.error('Error triggering Upstox login:', error)
+      setLoginMessage(`❌ Error: ${error.response?.data?.detail || error.message}`)
+    } finally {
+      setTriggeringLogin(false)
+    }
+  }
+
   return (
     <>
       <div className="card">
         <h2>Dashboard</h2>
         <p style={{ color: '#666', fontSize: '14px' }}></p>
       </div>
+
+      {/* Upstox Login Status Card */}
+      {upstoxLoginStatus && !upstoxLoginStatus.logged_in_today && (
+        <div className="card" style={{ 
+          marginTop: '20px', 
+          backgroundColor: '#fff3cd',
+          border: '2px solid #ffc107'
+        }}>
+          <h2 style={{ color: '#856404', marginBottom: '10px' }}>⚠️ Upstox Login Required</h2>
+          <p style={{ color: '#856404', marginBottom: '15px' }}>
+            {upstoxLoginStatus.message || 'Automated Upstox login did not happen today at 9:15 AM.'}
+          </p>
+          {loginMessage && (
+            <div style={{
+              padding: '10px',
+              marginBottom: '15px',
+              borderRadius: '4px',
+              backgroundColor: loginMessage.includes('✅') ? '#d4edda' : '#f8d7da',
+              color: loginMessage.includes('✅') ? '#155724' : '#721c24',
+              fontSize: '14px'
+            }}>
+              {loginMessage}
+            </div>
+          )}
+          <button
+            onClick={handleTriggerUpstoxLogin}
+            disabled={triggeringLogin}
+            style={{
+              padding: '12px 24px',
+              fontSize: '16px',
+              fontWeight: '600',
+              backgroundColor: triggeringLogin ? '#6c757d' : '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: triggeringLogin ? 'not-allowed' : 'pointer',
+              opacity: triggeringLogin ? 0.6 : 1
+            }}
+          >
+            {triggeringLogin ? 'Starting Login...' : '🤖 Start Automated Upstox Login'}
+          </button>
+          <p style={{ 
+            fontSize: '12px', 
+            color: '#856404', 
+            marginTop: '10px',
+            fontStyle: 'italic'
+          }}>
+            This will open a browser window and automatically complete the Upstox OAuth login.
+          </p>
+        </div>
+      )}
 
       {/* Market Data (mirrors Greeks page) */}
       <div className="card" style={{ marginTop: '20px' }}>
