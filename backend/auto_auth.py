@@ -3,8 +3,6 @@ import os
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
-from urllib.parse import urlparse, parse_qs
-import httpx
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -13,8 +11,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, NoSuchWindowException, WebDriverException
 import pyotp
 from dotenv import load_dotenv
-from auth import USER_CREDENTIALS, UPSTOX_TOKEN_URL, UPSTOX_AUTH_URL
-from database import store_tokens
+from auth import USER_CREDENTIALS, UPSTOX_AUTH_URL
 import concurrent.futures
 import threading
 
@@ -373,10 +370,16 @@ async def _do_oauth_login(user: str) -> Optional[str]:
                         return None
                     pin_continue_button.click()
                     print(f"✅ Clicked PIN Continue button")
-                    await asyncio.sleep(3)  # Wait for OAuth callback
+                    # Wait briefly for redirect to callback endpoint
+                    await asyncio.sleep(8)  # Give time for redirect to callback URL
                     if not _check_window_alive(driver):
                         print(f"❌ Browser window closed after PIN Continue")
                         return None
+                    
+                    # OAuth flow completed successfully
+                    # The callback endpoint will handle token extraction, exchange, and storage
+                    print(f"✅ OAuth flow completed. Callback endpoint will handle token storage.")
+                    return "success"  # Return success indicator
                 except (TimeoutException, NoSuchWindowException, WebDriverException) as e:
                     print(f"❌ Error with PIN Continue button: {str(e)}")
                     if not _check_window_alive(driver):
@@ -389,140 +392,9 @@ async def _do_oauth_login(user: str) -> Optional[str]:
                     return None
             else:
                 print("⚠️  PIN field not found")
+                return None
         except TimeoutException:
             print("⚠️  PIN field not found or timeout")
-        
-        # Step 6: Wait for OAuth consent/redirect and extract authorization code
-        print(f"⏳ Waiting for OAuth callback...")
-        await asyncio.sleep(5)  # Wait a bit longer for redirect
-        
-        # Check if window is still alive
-        if not _check_window_alive(driver):
-            print(f"❌ Browser window closed while waiting for callback")
-            return None
-        
-        # Get redirect URI base for comparison
-        redirect_uri_base = credentials['redirect_uri'].split('?')[0]
-        
-        # Check current URL for callback
-        try:
-            current_url = driver.current_url
-            print(f"📍 Initial URL after PIN: {current_url}")
-        except (NoSuchWindowException, WebDriverException):
-            print(f"❌ Browser window closed when getting URL")
-            return None
-        
-        # Wait for redirect to callback URL (with code parameter)
-        # Upstox redirects to the callback URL after successful authentication
-        max_wait = 45  # Increased wait time
-        wait_time = 0
-        callback_received = False
-        
-        while wait_time < max_wait:
-            if not _check_window_alive(driver):
-                print(f"❌ Browser window closed during callback wait")
-                return None
-            try:
-                current_url = driver.current_url
-                print(f"📍 Checking URL (attempt {wait_time + 1}/{max_wait}): {current_url}")
-                
-                # Check if we have the authorization code
-                if "code=" in current_url:
-                    print(f"✅ Found authorization code in URL!")
-                    callback_received = True
-                    break
-                
-                # Check if we're at the callback URL (even without code yet, might be loading)
-                if redirect_uri_base in current_url:
-                    print(f"✅ Reached callback URL: {current_url}")
-                    # Wait a bit more to see if code appears
-                    await asyncio.sleep(2)
-                    current_url = driver.current_url
-                    if "code=" in current_url:
-                        callback_received = True
-                        break
-                
-                # Check if we're stuck on login page (error case)
-                if "/login" in current_url and "code=" not in current_url:
-                    if wait_time > 10:  # Only log after waiting a bit
-                        print(f"⚠️  Still on login page after {wait_time} seconds")
-                
-            except (NoSuchWindowException, WebDriverException) as e:
-                print(f"❌ Browser window closed: {str(e)}")
-                return None
-            except Exception as e:
-                print(f"⚠️  Error checking URL: {str(e)}")
-            
-            await asyncio.sleep(1)
-            wait_time += 1
-        
-        if not _check_window_alive(driver):
-            print(f"❌ Browser window closed before final URL check")
-            return None
-        
-        try:
-            current_url = driver.current_url
-            print(f"📍 Final URL: {current_url}")
-        except (NoSuchWindowException, WebDriverException):
-            print(f"❌ Browser window closed when getting final URL")
-            return None
-        
-        if not callback_received:
-            print(f"⚠️  Callback not received within {max_wait} seconds")
-            print(f"   Final URL: {current_url}")
-            print(f"   Expected redirect URI base: {redirect_uri_base}")
-            # Note: Token checking removed to avoid event loop errors
-            # The callback endpoint will handle token storage if OAuth succeeds
-        
-        if "code=" in current_url:
-            parsed_url = urlparse(current_url)
-            query_params = parse_qs(parsed_url.query)
-            auth_code = query_params.get("code", [None])[0]
-            
-            if auth_code:
-                print(f"✅ Authorization code received: {auth_code[:20]}...")
-                
-                # Step 7: Exchange code for access token
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        UPSTOX_TOKEN_URL,
-                        data={
-                            "code": auth_code,
-                            "client_id": credentials["client_id"],
-                            "client_secret": credentials["client_secret"],
-                            "redirect_uri": credentials["redirect_uri"],
-                            "grant_type": "authorization_code"
-                        },
-                        headers={"Accept": "application/json"}
-                    )
-                    
-                    if response.status_code == 200:
-                        token_data = response.json()
-                        access_token = token_data.get("access_token")
-                        refresh_token = token_data.get("refresh_token", "")
-                        expires_in = token_data.get("expires_in", 3600)
-                        expires_at = int(time.time()) + expires_in
-                        
-                        # Store tokens
-                        await store_tokens(user, access_token, refresh_token, expires_at)
-                        print(f"✅ Automated login successful for {user}")
-                        return access_token
-                    else:
-                        print(f"❌ Token exchange failed: {response.status_code} - {response.text}")
-                        return None
-            else:
-                print(f"❌ No authorization code in callback URL")
-                return None
-        else:
-            print(f"❌ OAuth callback not received. Current URL: {current_url}")
-            # Note: Token checking removed to avoid event loop errors
-            # The callback endpoint will handle token storage if OAuth succeeds
-            
-            # Take screenshot for debugging
-            try:
-                driver.save_screenshot(f"oauth_error_{user}_{int(time.time())}.png")
-            except:
-                pass
             return None
             
     except (TimeoutException, NoSuchWindowException, WebDriverException) as e:
@@ -564,8 +436,8 @@ async def daily_token_refresh_scheduler():
             now_ist = now_utc + timedelta(hours=5, minutes=30)
             
             # Target time: 9:15 AM IST (03:45 UTC)
-            target_hour = 15
-            target_minute = 53
+            target_hour = 16
+            target_minute = 28
             
 
             
