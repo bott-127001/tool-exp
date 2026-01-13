@@ -185,11 +185,9 @@ def calculate_rea(
     REA = (RE_up - RE_down) / IB_range
     """
     if not intraday_prices:
-        print("⚠️ REA: No intraday prices provided")
         return None
 
     if session_start is None:
-        print("⚠️ REA: session_start is None")
         return None
 
     # Ensure session_start is timezone-aware (assume UTC if not)
@@ -216,17 +214,13 @@ def calculate_rea(
     # Only fall back to session_start if we can't find any price timestamps
     if first_price_ts:
         effective_start = first_price_ts
-        print(f"ℹ️ REA: Using first fetch timestamp as effective start. First fetch: {first_price_ts}, Market open: {session_start}")
     else:
         effective_start = session_start
-        print(f"⚠️ REA: No price timestamps found, falling back to market open time: {session_start}")
 
     # Split IB vs rest of day based on X minutes from session_start
     # TODO: Change back to 60 minutes for production after testing
     ib_minutes = 5  # Testing: 5 minutes. Production: 60 minutes
     ib_end = effective_start + timedelta(minutes=ib_minutes)
-    
-    print(f"ℹ️ REA: Calculating IB window. Effective start: {effective_start}, IB end: {ib_end}, IB minutes: {ib_minutes}")
     
     # Ensure all timestamps are timezone-aware for comparison
     ib_prices = []
@@ -258,31 +252,14 @@ def calculate_rea(
         try:
             if price_timestamp <= ib_end:
                 ib_prices.append(price)
-                if len(ib_prices) <= 3:  # Log first few prices for debugging
-                    print(f"ℹ️ REA: Added price to IB: {price} at {price_timestamp}")
         except (TypeError, ValueError) as e:
-            # If comparison fails, log and skip
-            print(f"⚠️ REA: Timestamp comparison error: {e}, timestamp: {price_timestamp}, ib_end: {ib_end}")
+            # If comparison fails, skip
             continue
 
     if len(all_prices) == 0:
-        print(f"⚠️ REA: No prices in price history. Total entries: {len(intraday_prices)}")
         return None
 
     if len(ib_prices) == 0:
-        # Debug: log why IB prices are empty
-        if len(intraday_prices) > 0:
-            first_ts = intraday_prices[0].get("timestamp")
-            last_ts = intraday_prices[-1].get("timestamp") if len(intraday_prices) > 1 else first_ts
-            print(f"⚠️ REA: No prices in IB window (first {ib_minutes} min). Effective start: {effective_start}, IB end: {ib_end}, First price ts: {first_ts}, Last price ts: {last_ts}, Total prices: {len(intraday_prices)}, All prices count: {len(all_prices)}")
-            # Show sample of price timestamps for debugging
-            sample_timestamps = []
-            for i, p in enumerate(intraday_prices[:5]):
-                ts = p.get("timestamp")
-                if ts:
-                    sample_timestamps.append(f"Price[{i}]: {ts}")
-            if sample_timestamps:
-                print(f"ℹ️ REA: Sample price timestamps: {', '.join(sample_timestamps)}")
         return None
 
     if len(all_prices) == 0:
@@ -303,8 +280,6 @@ def calculate_rea(
     # Check if we have prices outside the IB window
     # If we only have IB window data, we can't calculate meaningful RE Up/Down yet
     has_data_outside_ib = len(all_prices) > len(ib_prices)
-    
-    print(f"ℹ️ REA: IB High: {ib_high}, IB Low: {ib_low}, Current Day High: {day_high}, Current Day Low: {day_low}, IB prices: {len(ib_prices)}, All prices: {len(all_prices)}, Has data outside IB: {has_data_outside_ib}")
 
     # Calculate RE Up and RE Down
     # RE Up = Day High - IB High (how much price extended above IB)
@@ -315,7 +290,6 @@ def calculate_rea(
     # Calculate REA only if we have data outside IB window
     # If we only have IB data, return None for RE Up/Down/REA (frontend will show N/A)
     if not has_data_outside_ib:
-        print(f"ℹ️ REA: Only IB window data available ({len(ib_prices)} prices). RE Up/Down/REA will be None until data outside IB window is collected.")
         return {
             "ib_high": ib_high,
             "ib_low": ib_low,
@@ -332,8 +306,6 @@ def calculate_rea(
         rea = (re_up - re_down) / ib_range
     else:
         rea = 0.0
-
-    print(f"✅ REA: Calculated successfully. IB High: {ib_high}, IB Low: {ib_low}, IB Range: {ib_range}, Day High: {day_high}, Day Low: {day_low}, RE Up: {re_up}, RE Down: {re_down}, REA: {rea}, IB prices count: {len(ib_prices)}, All prices count: {len(all_prices)}")
 
     return {
         "ib_high": ib_high,
