@@ -446,20 +446,6 @@ async def _do_oauth_login(user: str) -> Optional[str]:
                 if "/login" in current_url and "code=" not in current_url:
                     if wait_time > 10:  # Only log after waiting a bit
                         print(f"⚠️  Still on login page after {wait_time} seconds")
-                        # If we're on login page, the callback might have already happened
-                        # Check if tokens were stored (callback endpoint might have processed it)
-                        from database import get_user_tokens
-                        import asyncio as aio
-                        try:
-                            # Check if tokens exist (callback might have already processed)
-                            loop = aio.get_event_loop()
-                            tokens = loop.run_until_complete(get_user_tokens(user))
-                            if tokens and tokens.get("access_token"):
-                                print(f"✅ Tokens found in database - callback was processed successfully!")
-                                print(f"   The OAuth flow completed, but browser redirected to login page")
-                                return tokens.get("access_token")
-                        except Exception as e:
-                            print(f"⚠️  Could not check tokens: {e}")
                 
             except (NoSuchWindowException, WebDriverException) as e:
                 print(f"❌ Browser window closed: {str(e)}")
@@ -485,20 +471,8 @@ async def _do_oauth_login(user: str) -> Optional[str]:
             print(f"⚠️  Callback not received within {max_wait} seconds")
             print(f"   Final URL: {current_url}")
             print(f"   Expected redirect URI base: {redirect_uri_base}")
-            # Check if tokens were stored anyway (callback might have been processed)
-            print(f"🔍 Checking if tokens were stored in database...")
-            try:
-                from database import get_user_tokens
-                loop = asyncio.get_event_loop()
-                tokens = await get_user_tokens(user)
-                if tokens and tokens.get("access_token"):
-                    print(f"✅ Tokens found in database! OAuth flow completed successfully.")
-                    print(f"   The callback was processed, but browser ended up on: {current_url}")
-                    return tokens.get("access_token")
-                else:
-                    print(f"❌ No tokens found in database")
-            except Exception as e:
-                print(f"⚠️  Error checking tokens: {e}")
+            # Note: Token checking removed to avoid event loop errors
+            # The callback endpoint will handle token storage if OAuth succeeds
         
         if "code=" in current_url:
             parsed_url = urlparse(current_url)
@@ -541,22 +515,8 @@ async def _do_oauth_login(user: str) -> Optional[str]:
                 return None
         else:
             print(f"❌ OAuth callback not received. Current URL: {current_url}")
-            # Final check: Maybe the callback was processed but browser redirected
-            # Check if tokens exist in database (callback might have processed it)
-            print(f"🔍 Final check: Verifying if tokens were stored...")
-            try:
-                from database import get_user_tokens
-                tokens = await get_user_tokens(user)
-                if tokens and tokens.get("access_token"):
-                    print(f"✅ SUCCESS! Tokens found in database despite URL mismatch.")
-                    print(f"   The OAuth callback was processed successfully.")
-                    print(f"   Browser ended up on: {current_url}")
-                    print(f"   This is normal - the callback endpoint processed the code and redirected.")
-                    return tokens.get("access_token")
-                else:
-                    print(f"❌ No tokens found. OAuth flow did not complete successfully.")
-            except Exception as e:
-                print(f"⚠️  Error checking tokens: {e}")
+            # Note: Token checking removed to avoid event loop errors
+            # The callback endpoint will handle token storage if OAuth succeeds
             
             # Take screenshot for debugging
             try:
