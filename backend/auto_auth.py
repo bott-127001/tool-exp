@@ -10,27 +10,40 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, NoSuchWindowException, WebDriverException
 import pyotp
 from dotenv import load_dotenv
 from auth import USER_CREDENTIALS, UPSTOX_TOKEN_URL, UPSTOX_AUTH_URL
 from database import store_tokens
 import concurrent.futures
+import threading
 
 load_dotenv()
 
 # Thread pool executor - created lazily to avoid startup issues
 _selenium_executor = None
+_selenium_lock = threading.Lock()  # Thread-safe lock to ensure only one Selenium instance
 
 def get_selenium_executor():
     """Get thread pool executor for Selenium operations."""
     global _selenium_executor
     if _selenium_executor is None:
         _selenium_executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=2, 
+            max_workers=1,  # Only 1 worker to prevent memory issues
             thread_name_prefix="selenium"
         )
     return _selenium_executor
+
+def _check_window_alive(driver) -> bool:
+    """Check if the browser window is still alive."""
+    try:
+        if driver is None:
+            return False
+        # Try to get window handles - will raise exception if window is closed
+        driver.window_handles
+        return True
+    except (NoSuchWindowException, WebDriverException, AttributeError):
+        return False
 
 # TOTP secrets from environment (base32 encoded)
 TOTP_SECRETS = {
@@ -82,6 +95,21 @@ async def automated_oauth_login(user: str) -> Optional[str]:
     Flow: OAuth URL → Phone Number → TOTP → 6-digit PIN → Callback
     Returns access_token if successful, None otherwise.
     """
+    # Use thread lock to ensure only one Selenium instance at a time
+    # Since this runs in a thread pool, we use threading.Lock instead of asyncio.Semaphore
+    if _selenium_lock.acquire(blocking=False):
+        try:
+            return await _do_oauth_login(user)
+        finally:
+            _selenium_lock.release()
+    else:
+        print(f"⚠️  Another Selenium operation in progress, skipping {user}")
+        return None
+
+async def _do_oauth_login(user: str) -> Optional[str]:
+    """
+    Internal OAuth login implementation.
+    """
     print(f"🤖 Starting automated OAuth login for {user}...")
     
     credentials = USER_CREDENTIALS.get(user)
@@ -94,18 +122,27 @@ async def automated_oauth_login(user: str) -> Optional[str]:
         print(f"❌ Upstox login credentials not configured for {user}")
         return None
     
-    # Setup Chrome in headless mode
+    # Setup Chrome in headless mode with memory optimizations
     chrome_options = Options()
-    chrome_options.add_argument("--headless")  # Run in background
+    chrome_options.add_argument("--headless=new")  # Use new headless mode (more efficient)
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--window-size=1280,720")  # Smaller window to save memory
     chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-    # Add timeout and performance options
-    chrome_options.add_argument("--timeout=60")
+    
+    # Memory optimization flags
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-plugins")
+    chrome_options.add_argument("--disable-images")  # Don't load images (saves memory)
+    chrome_options.add_argument("--disable-background-networking")
+    chrome_options.add_argument("--disable-background-timer-throttling")
+    chrome_options.add_argument("--disable-renderer-backgrounding")
+    chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+    chrome_options.add_argument("--disable-features=TranslateUI")
+    chrome_options.add_argument("--renderer-process-limit=1")  # Limit renderer processes
+    chrome_options.add_argument("--disable-software-rasterizer")
+    chrome_options.add_argument("--disable-setuid-sandbox")
     
     # Optional: Remove --headless to see browser during testing
     # chrome_options.add_argument("--headless")
@@ -136,8 +173,16 @@ async def automated_oauth_login(user: str) -> Optional[str]:
         print(f"📱 Navigating to OAuth URL...")
         try:
             driver.get(auth_url)
-        except TimeoutException:
-            print(f"⚠️  Page load timeout, but continuing...")
+            # Check if window is still alive after navigation
+            if not _check_window_alive(driver):
+                print(f"❌ Browser window closed during navigation")
+                return None
+        except (TimeoutException, NoSuchWindowException, WebDriverException) as e:
+            print(f"⚠️  Error navigating to OAuth URL: {str(e)}")
+            if not _check_window_alive(driver):
+                print(f"❌ Browser window closed")
+                return None
+            # Continue if it's just a timeout
         
         # Step 2: Wait for and fill phone number
         print(f"🔐 Waiting for phone number input...")
@@ -156,14 +201,25 @@ async def automated_oauth_login(user: str) -> Optional[str]:
             phone_field = None
             for selector_type, selector_value in phone_selectors:
                 try:
+                    # Check window before each attempt
+                    if not _check_window_alive(driver):
+                        print(f"❌ Browser window closed while waiting for phone field")
+                        return None
                     # Use shorter timeout per selector attempt
                     quick_wait = WebDriverWait(driver, 15)
                     phone_field = quick_wait.until(EC.presence_of_element_located((selector_type, selector_value)))
                     break
-                except TimeoutException:
+                except (TimeoutException, NoSuchWindowException, WebDriverException):
+                    if not _check_window_alive(driver):
+                        print(f"❌ Browser window closed")
+                        return None
                     continue
             
             if not phone_field:
+                # Check window one more time
+                if not _check_window_alive(driver):
+                    print(f"❌ Browser window closed")
+                    return None
                 # Take screenshot before failing
                 try:
                     driver.save_screenshot(f"oauth_error_phone_not_found_{user}_{int(time.time())}.png")
@@ -171,24 +227,47 @@ async def automated_oauth_login(user: str) -> Optional[str]:
                     pass
                 raise TimeoutException("Could not find phone number field")
             
+            # Check window before interacting
+            if not _check_window_alive(driver):
+                print(f"❌ Browser window closed before entering phone")
+                return None
+            
             phone_field.clear()
             phone_field.send_keys(user_creds["phone"])
             print(f"✅ Phone number entered")
-        except TimeoutException:
-            print(f"❌ Could not find phone number field")
-            driver.save_screenshot(f"oauth_error_phone_{user}_{int(time.time())}.png")
+        except (TimeoutException, NoSuchWindowException, WebDriverException) as e:
+            print(f"❌ Error with phone number field: {str(e)}")
+            if not _check_window_alive(driver):
+                print(f"❌ Browser window closed")
+                return None
+            try:
+                driver.save_screenshot(f"oauth_error_phone_{user}_{int(time.time())}.png")
+            except:
+                pass
             return None
         
         # Step 3: Click "Get OTP" button
         print(f"🔘 Clicking Get OTP button...")
         try:
+            if not _check_window_alive(driver):
+                print(f"❌ Browser window closed before Get OTP")
+                return None
             quick_wait = WebDriverWait(driver, 20)
             get_otp_button = quick_wait.until(EC.element_to_be_clickable((By.ID, "getOtp")))
+            if not _check_window_alive(driver):
+                print(f"❌ Browser window closed before clicking Get OTP")
+                return None
             get_otp_button.click()
             print(f"✅ Clicked Get OTP button")
             await asyncio.sleep(3)  # Wait for OTP to be sent/displayed
-        except TimeoutException:
-            print(f"❌ Could not find Get OTP button")
+            if not _check_window_alive(driver):
+                print(f"❌ Browser window closed after Get OTP")
+                return None
+        except (TimeoutException, NoSuchWindowException, WebDriverException) as e:
+            print(f"❌ Error with Get OTP button: {str(e)}")
+            if not _check_window_alive(driver):
+                print(f"❌ Browser window closed")
+                return None
             try:
                 driver.save_screenshot(f"oauth_error_getotp_{user}_{int(time.time())}.png")
             except:
@@ -210,13 +289,22 @@ async def automated_oauth_login(user: str) -> Optional[str]:
             totp_field = None
             for selector_type, selector_value in totp_selectors:
                 try:
+                    if not _check_window_alive(driver):
+                        print(f"❌ Browser window closed while waiting for TOTP field")
+                        return None
                     quick_wait = WebDriverWait(driver, 15)
                     totp_field = quick_wait.until(EC.presence_of_element_located((selector_type, selector_value)))
                     break
-                except TimeoutException:
+                except (TimeoutException, NoSuchWindowException, WebDriverException):
+                    if not _check_window_alive(driver):
+                        print(f"❌ Browser window closed")
+                        return None
                     continue
             
             if totp_field:
+                if not _check_window_alive(driver):
+                    print(f"❌ Browser window closed before entering TOTP")
+                    return None
                 totp_code = get_totp_code(user)
                 print(f"🔑 Generated TOTP: {totp_code}")
                 totp_field.clear()
@@ -252,13 +340,22 @@ async def automated_oauth_login(user: str) -> Optional[str]:
             pin_field = None
             for selector_type, selector_value in pin_selectors:
                 try:
+                    if not _check_window_alive(driver):
+                        print(f"❌ Browser window closed while waiting for PIN field")
+                        return None
                     quick_wait = WebDriverWait(driver, 15)
                     pin_field = quick_wait.until(EC.presence_of_element_located((selector_type, selector_value)))
                     break
-                except TimeoutException:
+                except (TimeoutException, NoSuchWindowException, WebDriverException):
+                    if not _check_window_alive(driver):
+                        print(f"❌ Browser window closed")
+                        return None
                     continue
             
             if pin_field:
+                if not _check_window_alive(driver):
+                    print(f"❌ Browser window closed before entering PIN")
+                    return None
                 pin_value = user_creds["pin"]
                 print(f"🔐 Entering PIN: {'*' * len(pin_value)}")
                 pin_field.clear()
@@ -266,13 +363,25 @@ async def automated_oauth_login(user: str) -> Optional[str]:
                 
                 # Submit PIN - Click Continue button
                 try:
+                    if not _check_window_alive(driver):
+                        print(f"❌ Browser window closed before PIN Continue")
+                        return None
                     quick_wait = WebDriverWait(driver, 20)
                     pin_continue_button = quick_wait.until(EC.element_to_be_clickable((By.ID, "pinContinueBtn")))
+                    if not _check_window_alive(driver):
+                        print(f"❌ Browser window closed before clicking PIN Continue")
+                        return None
                     pin_continue_button.click()
                     print(f"✅ Clicked PIN Continue button")
                     await asyncio.sleep(3)  # Wait for OAuth callback
-                except TimeoutException:
-                    print(f"❌ Could not find PIN Continue button")
+                    if not _check_window_alive(driver):
+                        print(f"❌ Browser window closed after PIN Continue")
+                        return None
+                except (TimeoutException, NoSuchWindowException, WebDriverException) as e:
+                    print(f"❌ Error with PIN Continue button: {str(e)}")
+                    if not _check_window_alive(driver):
+                        print(f"❌ Browser window closed")
+                        return None
                     try:
                         driver.save_screenshot(f"oauth_error_pin_continue_{user}_{int(time.time())}.png")
                     except:
@@ -287,22 +396,46 @@ async def automated_oauth_login(user: str) -> Optional[str]:
         print(f"⏳ Waiting for OAuth callback...")
         await asyncio.sleep(3)
         
+        # Check if window is still alive
+        if not _check_window_alive(driver):
+            print(f"❌ Browser window closed while waiting for callback")
+            return None
+        
         # Check current URL for callback
-        current_url = driver.current_url
-        print(f"📍 Current URL: {current_url}")
+        try:
+            current_url = driver.current_url
+            print(f"📍 Current URL: {current_url}")
+        except (NoSuchWindowException, WebDriverException):
+            print(f"❌ Browser window closed when getting URL")
+            return None
         
         # Wait for redirect to callback URL (with code parameter)
         max_wait = 30
         wait_time = 0
         while wait_time < max_wait:
-            current_url = driver.current_url
-            if "code=" in current_url or credentials['redirect_uri'].split('?')[0] in current_url:
-                break
+            if not _check_window_alive(driver):
+                print(f"❌ Browser window closed during callback wait")
+                return None
+            try:
+                current_url = driver.current_url
+                if "code=" in current_url or credentials['redirect_uri'].split('?')[0] in current_url:
+                    break
+            except (NoSuchWindowException, WebDriverException):
+                print(f"❌ Browser window closed")
+                return None
             await asyncio.sleep(1)
             wait_time += 1
         
-        current_url = driver.current_url
-        print(f"📍 Final URL: {current_url}")
+        if not _check_window_alive(driver):
+            print(f"❌ Browser window closed before final URL check")
+            return None
+        
+        try:
+            current_url = driver.current_url
+            print(f"📍 Final URL: {current_url}")
+        except (NoSuchWindowException, WebDriverException):
+            print(f"❌ Browser window closed when getting final URL")
+            return None
         
         if "code=" in current_url:
             parsed_url = urlparse(current_url)
@@ -349,9 +482,9 @@ async def automated_oauth_login(user: str) -> Optional[str]:
             driver.save_screenshot(f"oauth_error_{user}_{int(time.time())}.png")
             return None
             
-    except TimeoutException as e:
-        print(f"❌ Timeout during automated login: {str(e)}")
-        if driver:
+    except (TimeoutException, NoSuchWindowException, WebDriverException) as e:
+        print(f"❌ Error during automated login: {str(e)}")
+        if driver and _check_window_alive(driver):
             try:
                 driver.save_screenshot(f"oauth_timeout_{user}_{int(time.time())}.png")
             except:
@@ -361,7 +494,7 @@ async def automated_oauth_login(user: str) -> Optional[str]:
         print(f"❌ Error during automated login: {str(e)}")
         import traceback
         traceback.print_exc()
-        if driver:
+        if driver and _check_window_alive(driver):
             try:
                 driver.save_screenshot(f"oauth_exception_{user}_{int(time.time())}.png")
             except:
@@ -389,7 +522,7 @@ async def daily_token_refresh_scheduler():
             
             # Target time: 9:15 AM IST (03:45 UTC)
             target_hour = 14
-            target_minute = 50
+            target_minute = 59
 
             
             # Calculate next refresh time
