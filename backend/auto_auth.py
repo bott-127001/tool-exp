@@ -51,6 +51,22 @@ def get_totp_code(user: str) -> str:
     return totp.now()
 
 
+def _run_selenium_login_sync(user: str) -> Optional[str]:
+    """
+    Synchronous wrapper for automated_oauth_login.
+    This runs in a thread pool executor to avoid blocking the async event loop.
+    Creates a new event loop in the thread since we can't use asyncio.run() 
+    when there's already a running event loop.
+    """
+    # Create a new event loop for this thread
+    new_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(new_loop)
+    try:
+        return new_loop.run_until_complete(automated_oauth_login(user))
+    finally:
+        new_loop.close()
+
+
 async def automated_oauth_login(user: str) -> Optional[str]:
     """
     Automate OAuth login flow for a user.
@@ -317,7 +333,8 @@ async def daily_token_refresh_scheduler():
             
             # Target time: 9:15 AM IST (03:45 UTC)
             target_hour = 01
-            target_minute = 00
+            target_minute = 10
+            
             
             # Calculate next refresh time
             if now_ist.hour < target_hour or (now_ist.hour == target_hour and now_ist.minute < target_minute):
@@ -355,7 +372,8 @@ async def daily_token_refresh_scheduler():
                     loop = asyncio.get_event_loop()
                     success = await loop.run_in_executor(
                         selenium_executor,
-                        lambda u=user: asyncio.run(automated_oauth_login(u))
+                        _run_selenium_login_sync,
+                        user
                     )
                     if success:
                         print(f"✅ Successfully refreshed token for {user}")
