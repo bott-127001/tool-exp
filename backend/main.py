@@ -24,31 +24,70 @@ from fastapi.responses import StreamingResponse
 import io
 
 
+import os
+
+def _is_main_worker():
+    """Check if this is the main worker process (first worker)"""
+    # Use a file-based lock to ensure only one worker starts background tasks
+    # This works across multiple gunicorn workers
+    lock_file = "/tmp/background_tasks.lock"
+    
+    try:
+        import fcntl
+        # Try to acquire an exclusive lock (non-blocking)
+        lock_fd = os.open(lock_file, os.O_CREAT | os.O_WRONLY)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # We got the lock, this is the main worker
+            return True
+        except (IOError, OSError):
+            # Lock is held by another process
+            os.close(lock_fd)
+            return False
+    except (ImportError, OSError):
+        # fcntl not available (Windows) or file operations failed
+        # Fallback: check environment variable set by first worker
+        if os.getenv("BACKGROUND_TASKS_STARTED") == "1":
+            return False
+        os.environ["BACKGROUND_TASKS_STARTED"] = "1"
+        return True
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     await init_db()
-    print("Database initialized")
-    print("Backend server ready. Polling will start automatically when a user authenticates.")
     
-    # Start background polling task (will wait for authentication)
-    polling_task = asyncio.create_task(start_polling()) # The worker will use the global manager
+    # Only start background tasks in one worker to avoid duplicates
+    is_main = _is_main_worker()
     
-    # Start automated token refresh scheduler (runs daily at 9:15 AM IST)
-    from auto_auth import daily_token_refresh_scheduler
-    token_refresh_task = asyncio.create_task(daily_token_refresh_scheduler())
+    if is_main:
+        print("Database initialized")
+        print("Backend server ready. Polling will start automatically when a user authenticates.")
+        
+        # Start background polling task (will wait for authentication)
+        polling_task = asyncio.create_task(start_polling()) # The worker will use the global manager
+        
+        # Start automated token refresh scheduler (runs daily at 9:15 AM IST)
+        from auto_auth import daily_token_refresh_scheduler
+        token_refresh_task = asyncio.create_task(daily_token_refresh_scheduler())
+    else:
+        # This is a duplicate worker, just initialize DB
+        print("Database initialized (worker process)")
+        polling_task = None
+        token_refresh_task = None
     
     yield
     
     # Shutdown
-    await stop_polling()
-    polling_task.cancel()
-    token_refresh_task.cancel()
-    try:
-        await polling_task
-        await token_refresh_task
-    except asyncio.CancelledError:
-        pass
+    if polling_task is not None and token_refresh_task is not None:
+        await stop_polling()
+        polling_task.cancel()
+        token_refresh_task.cancel()
+        try:
+            await polling_task
+            await token_refresh_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(lifespan=lifespan)

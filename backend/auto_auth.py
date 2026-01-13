@@ -102,14 +102,27 @@ async def automated_oauth_login(user: str) -> Optional[str]:
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+    # Add timeout and performance options
+    chrome_options.add_argument("--timeout=60")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-plugins")
     
     # Optional: Remove --headless to see browser during testing
     # chrome_options.add_argument("--headless")
     
     driver = None
     try:
-        driver = webdriver.Chrome(options=chrome_options)
+        from selenium.webdriver.chrome.service import Service
+        from selenium.webdriver.chrome.service import Service as ChromeService
+        
+        # Create service with timeout settings
+        service = ChromeService()
+        driver = webdriver.Chrome(service=service, options=chrome_options)
         driver.implicitly_wait(10)
+        # Set page load timeout to prevent hanging (60 seconds)
+        driver.set_page_load_timeout(60)
+        # Set script timeout
+        driver.set_script_timeout(60)
         
         # Step 1: Navigate to OAuth authorization URL
         from urllib.parse import urlencode
@@ -121,11 +134,14 @@ async def automated_oauth_login(user: str) -> Optional[str]:
         }
         auth_url = f"{UPSTOX_AUTH_URL}?{urlencode(params)}"
         print(f"📱 Navigating to OAuth URL...")
-        driver.get(auth_url)
+        try:
+            driver.get(auth_url)
+        except TimeoutException:
+            print(f"⚠️  Page load timeout, but continuing...")
         
         # Step 2: Wait for and fill phone number
         print(f"🔐 Waiting for phone number input...")
-        wait = WebDriverWait(driver, 30)
+        wait = WebDriverWait(driver, 45)  # Increased timeout
         
         # Find phone number field - adjust selector based on actual Upstox page
         # Common selectors: input[name="mobile"], input[type="tel"], input[id*="phone"]
@@ -140,12 +156,19 @@ async def automated_oauth_login(user: str) -> Optional[str]:
             phone_field = None
             for selector_type, selector_value in phone_selectors:
                 try:
-                    phone_field = wait.until(EC.presence_of_element_located((selector_type, selector_value)))
+                    # Use shorter timeout per selector attempt
+                    quick_wait = WebDriverWait(driver, 15)
+                    phone_field = quick_wait.until(EC.presence_of_element_located((selector_type, selector_value)))
                     break
                 except TimeoutException:
                     continue
             
             if not phone_field:
+                # Take screenshot before failing
+                try:
+                    driver.save_screenshot(f"oauth_error_phone_not_found_{user}_{int(time.time())}.png")
+                except:
+                    pass
                 raise TimeoutException("Could not find phone number field")
             
             phone_field.clear()
@@ -159,13 +182,17 @@ async def automated_oauth_login(user: str) -> Optional[str]:
         # Step 3: Click "Get OTP" button
         print(f"🔘 Clicking Get OTP button...")
         try:
-            get_otp_button = wait.until(EC.element_to_be_clickable((By.ID, "getOtp")))
+            quick_wait = WebDriverWait(driver, 20)
+            get_otp_button = quick_wait.until(EC.element_to_be_clickable((By.ID, "getOtp")))
             get_otp_button.click()
             print(f"✅ Clicked Get OTP button")
             await asyncio.sleep(3)  # Wait for OTP to be sent/displayed
         except TimeoutException:
             print(f"❌ Could not find Get OTP button")
-            driver.save_screenshot(f"oauth_error_getotp_{user}_{int(time.time())}.png")
+            try:
+                driver.save_screenshot(f"oauth_error_getotp_{user}_{int(time.time())}.png")
+            except:
+                pass
             return None
         
         # Step 4: Handle TOTP
@@ -183,7 +210,8 @@ async def automated_oauth_login(user: str) -> Optional[str]:
             totp_field = None
             for selector_type, selector_value in totp_selectors:
                 try:
-                    totp_field = wait.until(EC.presence_of_element_located((selector_type, selector_value)))
+                    quick_wait = WebDriverWait(driver, 15)
+                    totp_field = quick_wait.until(EC.presence_of_element_located((selector_type, selector_value)))
                     break
                 except TimeoutException:
                     continue
@@ -224,7 +252,8 @@ async def automated_oauth_login(user: str) -> Optional[str]:
             pin_field = None
             for selector_type, selector_value in pin_selectors:
                 try:
-                    pin_field = wait.until(EC.presence_of_element_located((selector_type, selector_value)))
+                    quick_wait = WebDriverWait(driver, 15)
+                    pin_field = quick_wait.until(EC.presence_of_element_located((selector_type, selector_value)))
                     break
                 except TimeoutException:
                     continue
@@ -237,13 +266,17 @@ async def automated_oauth_login(user: str) -> Optional[str]:
                 
                 # Submit PIN - Click Continue button
                 try:
-                    pin_continue_button = wait.until(EC.element_to_be_clickable((By.ID, "pinContinueBtn")))
+                    quick_wait = WebDriverWait(driver, 20)
+                    pin_continue_button = quick_wait.until(EC.element_to_be_clickable((By.ID, "pinContinueBtn")))
                     pin_continue_button.click()
                     print(f"✅ Clicked PIN Continue button")
                     await asyncio.sleep(3)  # Wait for OAuth callback
                 except TimeoutException:
                     print(f"❌ Could not find PIN Continue button")
-                    driver.save_screenshot(f"oauth_error_pin_continue_{user}_{int(time.time())}.png")
+                    try:
+                        driver.save_screenshot(f"oauth_error_pin_continue_{user}_{int(time.time())}.png")
+                    except:
+                        pass
                     return None
             else:
                 print("⚠️  PIN field not found")
@@ -316,16 +349,30 @@ async def automated_oauth_login(user: str) -> Optional[str]:
             driver.save_screenshot(f"oauth_error_{user}_{int(time.time())}.png")
             return None
             
+    except TimeoutException as e:
+        print(f"❌ Timeout during automated login: {str(e)}")
+        if driver:
+            try:
+                driver.save_screenshot(f"oauth_timeout_{user}_{int(time.time())}.png")
+            except:
+                pass
+        return None
     except Exception as e:
         print(f"❌ Error during automated login: {str(e)}")
         import traceback
         traceback.print_exc()
         if driver:
-            driver.save_screenshot(f"oauth_exception_{user}_{int(time.time())}.png")
+            try:
+                driver.save_screenshot(f"oauth_exception_{user}_{int(time.time())}.png")
+            except:
+                pass
         return None
     finally:
         if driver:
-            driver.quit()
+            try:
+                driver.quit()
+            except:
+                pass
 
 
 async def daily_token_refresh_scheduler():
@@ -342,7 +389,7 @@ async def daily_token_refresh_scheduler():
             
             # Target time: 9:15 AM IST (03:45 UTC)
             target_hour = 14
-            target_minute = 20
+            target_minute = 50
 
             
             # Calculate next refresh time
