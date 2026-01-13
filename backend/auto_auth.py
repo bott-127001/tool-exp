@@ -15,8 +15,13 @@ import pyotp
 from dotenv import load_dotenv
 from auth import USER_CREDENTIALS, UPSTOX_TOKEN_URL, UPSTOX_AUTH_URL
 from database import store_tokens
+import concurrent.futures
 
 load_dotenv()
+
+# Create a thread pool executor for Selenium operations (prevents worker timeout in production)
+# This runs blocking Selenium operations in separate threads so they don't block the async event loop
+selenium_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="selenium")
 
 # TOTP secrets from environment (base32 encoded)
 TOTP_SECRETS = {
@@ -311,8 +316,8 @@ async def daily_token_refresh_scheduler():
             now_ist = now_utc + timedelta(hours=5, minutes=30)
             
             # Target time: 9:15 AM IST (03:45 UTC)
-            target_hour = 10
-            target_minute = 45
+            target_hour = 01
+            target_minute = 00
             
             # Calculate next refresh time
             if now_ist.hour < target_hour or (now_ist.hour == target_hour and now_ist.minute < target_minute):
@@ -345,13 +350,21 @@ async def daily_token_refresh_scheduler():
             print(f"\n🔄 Starting daily token refresh at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
             for user in ["samarth", "prajwal"]:
                 try:
-                    success = await automated_oauth_login(user)
+                    # Run Selenium in thread pool to prevent worker timeout in production
+                    # Selenium operations are blocking, so we run them in a separate thread
+                    loop = asyncio.get_event_loop()
+                    success = await loop.run_in_executor(
+                        selenium_executor,
+                        lambda u=user: asyncio.run(automated_oauth_login(u))
+                    )
                     if success:
                         print(f"✅ Successfully refreshed token for {user}")
                     else:
                         print(f"❌ Failed to refresh token for {user}")
                 except Exception as e:
                     print(f"❌ Error refreshing token for {user}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
             
             print(f"✅ Daily token refresh completed\n")
             

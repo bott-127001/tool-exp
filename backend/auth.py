@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 import httpx
 import os
 import secrets
+import asyncio
 from typing import Optional
 from urllib.parse import urlencode
 from dotenv import load_dotenv
@@ -605,10 +606,15 @@ async def trigger_upstox_login(request: Request):
         print(f"🤖 Manual Upstox login triggered for {username}")
         
         # Import and call automated login
-        from auto_auth import automated_oauth_login
+        from auto_auth import automated_oauth_login, selenium_executor
         from data_fetcher import enable_polling
         
-        success = await automated_oauth_login(username)
+        # Run Selenium in thread pool to prevent worker timeout in production
+        loop = asyncio.get_event_loop()
+        success = await loop.run_in_executor(
+            selenium_executor,
+            lambda: asyncio.run(automated_oauth_login(username))
+        )
         
         if success:
             # Enable polling after successful login
