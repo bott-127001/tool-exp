@@ -69,7 +69,10 @@ export function DataProvider({ children }) {
     };
 
     ws.onerror = (error) => {
-      console.error('[Context] ❌ WebSocket error occurred:', error);
+      // Only log errors if not already reconnecting to avoid spam
+      if (!reconnectTimeoutRef.current) {
+        console.warn('[Context] ⚠️ WebSocket connection error (will retry):', error);
+      }
       setConnected(false);
     };
 

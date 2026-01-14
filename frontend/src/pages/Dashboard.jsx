@@ -159,14 +159,16 @@ function Dashboard() {
       </div>
 
       {/* Upstox Login Status Card */}
-      {upstoxLoginStatus && !upstoxLoginStatus.logged_in_today && (
+      {upstoxLoginStatus && (!upstoxLoginStatus.logged_in_today || upstoxLoginStatus.login_failed_today) && (
         <div className="card" style={{ 
           marginTop: '20px', 
-          backgroundColor: '#fff3cd',
-          border: '2px solid #ffc107'
+          backgroundColor: upstoxLoginStatus.login_failed_today ? '#f8d7da' : '#fff3cd',
+          border: `2px solid ${upstoxLoginStatus.login_failed_today ? '#dc3545' : '#ffc107'}`
         }}>
-          <h2 style={{ color: '#856404', marginBottom: '10px' }}>⚠️ Upstox Login Required</h2>
-          <p style={{ color: '#856404', marginBottom: '15px' }}>
+          <h2 style={{ color: upstoxLoginStatus.login_failed_today ? '#721c24' : '#856404', marginBottom: '10px' }}>
+            ⚠️ Upstox Login Required
+          </h2>
+          <p style={{ color: upstoxLoginStatus.login_failed_today ? '#721c24' : '#856404', marginBottom: '15px' }}>
             {upstoxLoginStatus.message || 'Automated Upstox login did not happen today at 9:15 AM.'}
           </p>
           {loginMessage && (

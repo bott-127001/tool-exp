@@ -1,4 +1,5 @@
 import json
+import asyncio
 from datetime import datetime
 from typing import Optional, Dict, List
 import os
@@ -13,7 +14,21 @@ except ImportError:
     exit(1)
 
 MONGO_URI = os.getenv("MONGO_URI")
-client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, tlsCAFile=certifi.where())
+
+# Only use SSL/TLS for MongoDB Atlas (cloud) connections, not for local MongoDB
+# MongoDB Atlas connection strings contain "mongodb.net" or "mongodb+srv://"
+if MONGO_URI and ("mongodb.net" in MONGO_URI or "mongodb+srv://" in MONGO_URI):
+    # Cloud MongoDB (Atlas) - use SSL
+    client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, tlsCAFile=certifi.where())
+else:
+    # Local MongoDB - no SSL
+    if MONGO_URI:
+        client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
+    else:
+        # Fallback: try local MongoDB without connection string
+        print("⚠️  MONGO_URI not set in .env file. Attempting to connect to local MongoDB...")
+        client = motor.motor_asyncio.AsyncIOMotorClient("mongodb://localhost:27017/")
+
 db = client.get_database("option_tool_db")
 
 users_collection = db.get_collection("users")
@@ -25,11 +40,15 @@ frontend_users_collection = db.get_collection("frontend_users")
 async def init_db():
     """Initialize database indexes and default settings."""
     try:
-        # Test connection
-        await client.admin.command('ping')
+        # Test connection with timeout
+        await asyncio.wait_for(client.admin.command('ping'), timeout=5.0)
         print("✅ Pinged your deployment. You successfully connected to MongoDB!")
-    except ConnectionFailure as e:
+    except (ConnectionFailure, asyncio.TimeoutError, Exception) as e:
         print(f"❌ MongoDB connection failed: {e}")
+        if not MONGO_URI:
+            print("⚠️  Tip: Set MONGO_URI in your .env file with your MongoDB connection string")
+            print("   For local MongoDB: MONGO_URI=mongodb://localhost:27017/")
+            print("   For MongoDB Atlas: MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/")
         return
 
     # Create indexes for faster queries
@@ -76,11 +95,35 @@ async def store_tokens(username: str, access_token: str, refresh_token: str, exp
                 "access_token": access_token,
                 "refresh_token": refresh_token,
                 "token_expires_at": expires_at,
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.utcnow(),
+                "last_login_success": True,  # Track successful login
+                "last_login_failure": None   # Clear any previous failure
             },
             "$setOnInsert": {"username": username, "created_at": datetime.utcnow()}
         },
         upsert=True
+    )
+
+
+async def mark_login_failure(username: str, error_message: str = None):
+    """Mark that login failed for a user on a specific date."""
+    from datetime import timezone, timedelta
+    now_utc = datetime.now(timezone.utc)
+    now_ist = now_utc + timedelta(hours=5, minutes=30)
+    today_str = now_ist.strftime("%Y-%m-%d")
+    
+    await users_collection.update_one(
+        {"username": username},
+        {
+            "$set": {
+                "last_login_failure": {
+                    "date": today_str,
+                    "timestamp": datetime.utcnow(),
+                    "error": error_message
+                },
+                "last_login_success": False
+            }
+        }
     )
 
 async def get_user_tokens(username: str) -> Optional[Dict]:

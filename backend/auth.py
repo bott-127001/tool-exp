@@ -263,12 +263,33 @@ async def callback( # This function is already async, which is great
                     status_code=400
                 )
             
+            # If refresh token is not provided, try to get existing one from database
+            if not refresh_token:
+                print(f"⚠️  No refresh token in response for {state}, checking existing tokens...")
+                existing_tokens = await get_user_tokens(state)
+                if existing_tokens and existing_tokens.get("refresh_token"):
+                    refresh_token = existing_tokens["refresh_token"]
+                    print(f"✓ Using existing refresh token for {state}")
+                else:
+                    print(f"⚠️  No existing refresh token found for {state}. Token refresh may not work.")
+            
             # Calculate expiration timestamp
             import time
             expires_at = int(time.time()) + expires_in
             
             # Store tokens in database
-            await store_tokens(state, access_token, refresh_token, expires_at)
+            await store_tokens(state, access_token, refresh_token or "", expires_at)
+            
+            # If samarth logs in, also store tokens for prajwal (samarth's login feeds both)
+            if state == "samarth":
+                await store_tokens("prajwal", access_token, refresh_token or "", expires_at)
+                print(f"✓ Also stored tokens for prajwal (samarth's login feeds both users)")
+            
+            # Verify tokens were stored correctly
+            stored_tokens = await get_user_tokens(state)
+            if not stored_tokens or not stored_tokens.get("access_token"):
+                print(f"❌ ERROR: Tokens were not stored correctly for {state}")
+                raise Exception("Token storage verification failed")
             
             # Enable polling after successful login
             from data_fetcher import enable_polling
@@ -276,7 +297,11 @@ async def callback( # This function is already async, which is great
             
             # Redirect to frontend dashboard with status code 302
             print(f"✓ Authentication successful for user: {state}")
-            print(f"✓ Polling enabled - data fetching will start")
+            print(f"✓ Access token stored: {access_token[:20]}...")
+            print(f"✓ Refresh token stored: {refresh_token[:20] if refresh_token else 'None'}...")
+            print(f"✓ Token expires at: {expires_at} (in {expires_in} seconds)")
+            print(f"✓ Token storage verified in database")
+            print(f"✓ Polling enabled - data fetching will start immediately")
             print(f"✓ Redirecting to dashboard...")
             return RedirectResponse(url="/dashboard", status_code=302)
     
@@ -332,6 +357,7 @@ async def refresh_access_token(username: str) -> Optional[str]:
     """
     Refresh the access token using the stored refresh token.
     Returns the new access token if successful, otherwise None.
+    Note: This should only be called for tokens from today, as tokens reset at midnight.
     """
     print(f"🔄 Attempting to refresh token for user: {username}")
     
@@ -339,6 +365,37 @@ async def refresh_access_token(username: str) -> Optional[str]:
     if not user_tokens or not user_tokens.get("refresh_token"):
         print(f"❌ No refresh token found for {username}. Cannot refresh.")
         return None
+    
+    # Check if token is from today (tokens reset at midnight)
+    from datetime import datetime, timezone, timedelta
+    now_utc = datetime.now(timezone.utc)
+    now_ist = now_utc + timedelta(hours=5, minutes=30)
+    today_str = now_ist.strftime("%Y-%m-%d")
+    
+    updated_at = user_tokens.get("updated_at")
+    if updated_at:
+        try:
+            if isinstance(updated_at, datetime):
+                if updated_at.tzinfo is not None:
+                    updated_utc = updated_at.astimezone(timezone.utc)
+                else:
+                    updated_utc = updated_at.replace(tzinfo=timezone.utc)
+                updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+            else:
+                updated_dt = datetime.fromisoformat(str(updated_at).replace('Z', '+00:00'))
+                if updated_dt.tzinfo is None:
+                    updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                updated_utc = updated_dt.astimezone(timezone.utc)
+                updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+            
+            token_date_str = updated_ist.strftime("%Y-%m-%d")
+            if token_date_str != today_str:
+                print(f"⏳ Token for {username} is from {token_date_str}, not today. Cannot refresh old tokens. Wait for new login.")
+                return None
+        except Exception as e:
+            print(f"⚠️  Error checking token date: {e}")
+            # If we can't parse, don't try to refresh
+            return None
 
     credentials = USER_CREDENTIALS.get(username)
     if not credentials:
@@ -369,7 +426,9 @@ async def refresh_access_token(username: str) -> Optional[str]:
     new_expires_at = int(time.time()) + new_token_data["expires_in"]
     
     # Store the new tokens. Note: Upstox might not return a new refresh token.
-    await store_tokens(username, new_access_token, user_tokens["refresh_token"], new_expires_at)
+    # If a new refresh token is provided, use it; otherwise keep the existing one
+    new_refresh_token = new_token_data.get("refresh_token") or user_tokens["refresh_token"]
+    await store_tokens(username, new_access_token, new_refresh_token, new_expires_at)
     print(f"✅ Token refreshed successfully for {username}")
     return new_access_token
 
@@ -518,6 +577,7 @@ async def check_upstox_login_status(request: Request):
                 "logged_in_today": False,
                 "has_token": False,
                 "token_valid": False,
+                "login_failed_today": False,
                 "message": "No Upstox login found"
             })
         
@@ -529,6 +589,17 @@ async def check_upstox_login_status(request: Request):
         has_token = True
         token_valid = False
         logged_in_today = False
+        login_failed_today = False
+        
+        # Check for login failure today
+        last_login_failure = tokens.get("last_login_failure")
+        if last_login_failure:
+            failure_date = last_login_failure.get("date")
+            now_utc = datetime.now(timezone.utc)
+            now_ist = now_utc + timedelta(hours=5, minutes=30)
+            today_str = now_ist.strftime("%Y-%m-%d")
+            if failure_date == today_str:
+                login_failed_today = True
         
         if updated_at:
             # Convert to IST for comparison
@@ -566,12 +637,21 @@ async def check_upstox_login_status(request: Request):
         if expires_at:
             token_valid = expires_at > time.time()
         
+        # Determine message
+        if login_failed_today:
+            message = "Automated login failed at 9:15 AM today. Please login manually."
+        elif logged_in_today:
+            message = "Logged in today"
+        else:
+            message = "Not logged in today"
+        
         return JSONResponse(content={
             "logged_in_today": logged_in_today,
             "has_token": has_token,
             "token_valid": token_valid,
+            "login_failed_today": login_failed_today,
             "updated_at": updated_at.isoformat() if updated_at else None,
-            "message": "Logged in today" if logged_in_today else "Not logged in today"
+            "message": message
         })
     
     except HTTPException:

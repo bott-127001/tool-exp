@@ -59,12 +59,48 @@ async def fetch_option_chain(username: str) -> Optional[Dict]:
         print(f"No tokens found for user: {username}")
         return None
     
+    # Check if tokens are from today (tokens reset at midnight)
+    now_utc = datetime.now(timezone.utc)
+    now_ist = now_utc + timedelta(hours=5, minutes=30)
+    today_str = now_ist.strftime("%Y-%m-%d")
+    
+    updated_at = tokens.get("updated_at")
+    if updated_at:
+        try:
+            # Convert to IST for comparison
+            if isinstance(updated_at, datetime):
+                if updated_at.tzinfo is not None:
+                    updated_utc = updated_at.astimezone(timezone.utc)
+                else:
+                    updated_utc = updated_at.replace(tzinfo=timezone.utc)
+                updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+            else:
+                updated_dt = datetime.fromisoformat(str(updated_at).replace('Z', '+00:00'))
+                if updated_dt.tzinfo is None:
+                    updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                updated_utc = updated_dt.astimezone(timezone.utc)
+                updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+            
+            token_date_str = updated_ist.strftime("%Y-%m-%d")
+            if token_date_str != today_str:
+                print(f"⏳ Token for {username} is from {token_date_str}, not today. Waiting for new login...")
+                return None
+        except Exception as e:
+            print(f"⚠️  Error checking token date: {e}")
+            return None
+    
     # Check token expiration
     import time
     access_token = tokens.get("access_token")
     
-    if not access_token or tokens.get("token_expires_at", 0) <= time.time():
-        print(f"Token expired for user: {username}")
+    # Check if token is expired (with 60 second buffer to avoid edge cases)
+    token_expires_at = tokens.get("token_expires_at", 0)
+    if not access_token or token_expires_at <= (time.time() + 60):
+        if token_expires_at <= time.time():
+            print(f"Token expired for user: {username}")
+        else:
+            print(f"Token expiring soon for user: {username}, refreshing proactively")
+        # Only try to refresh if token is from today
         new_access_token = await refresh_access_token(username)
         if not new_access_token:
             print(f"❌ Failed to refresh token for {username}. User needs to log in again.")
@@ -404,24 +440,62 @@ async def polling_worker():
             await asyncio.sleep(60) # Check every minute
             continue
         
-        # Find authenticated user (first available)
+        # Find authenticated user (first available) with tokens from TODAY
+        # Tokens reset at midnight, so we only use tokens from today
         found_user = None
+        today_str = now_ist.strftime("%Y-%m-%d")
+        
         for user in ["samarth", "prajwal"]:
             tokens = await get_user_tokens(user)
-            # Check if token exists. We allow expired tokens here because fetch_option_chain
-            # has built-in logic to refresh them.
-            if tokens and tokens.get("access_token"):
-                found_user = user
-                break
+            if not tokens or not tokens.get("access_token"):
+                continue
+            
+            # Check if tokens are from today (not yesterday)
+            updated_at = tokens.get("updated_at")
+            if updated_at:
+                try:
+                    # Convert to IST for comparison
+                    if isinstance(updated_at, datetime):
+                        if updated_at.tzinfo is not None:
+                            updated_utc = updated_at.astimezone(timezone.utc)
+                        else:
+                            updated_utc = updated_at.replace(tzinfo=timezone.utc)
+                        updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+                    else:
+                        # If it's a string, try to parse
+                        updated_dt = datetime.fromisoformat(str(updated_at).replace('Z', '+00:00'))
+                        if updated_dt.tzinfo is None:
+                            updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                        updated_utc = updated_dt.astimezone(timezone.utc)
+                        updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+                    
+                    token_date_str = updated_ist.strftime("%Y-%m-%d")
+                    # Only use tokens from today
+                    if token_date_str == today_str:
+                        found_user = user
+                        break
+                    else:
+                        # Token is from previous day - ignore it, wait for new login
+                        print(f"⏳ Token for {user} is from {token_date_str}, waiting for today's login...")
+                except Exception as e:
+                    print(f"⚠️  Error checking token date for {user}: {e}")
+                    # If we can't parse the date, skip this user
+                    continue
         
         if not found_user:
-            # No authenticated user found - reset and wait
+            # No authenticated user found with today's tokens - reset and wait
             if current_user:
-                print(f"⚠️  No authenticated user available. Stopping polling...")
+                print(f"⚠️  No authenticated user available with today's tokens. Waiting for automated login at 9:15 AM...")
                 current_user = None
-                # Disable polling when user logs out
-                # should_poll = False # Let logout handle this
+                latest_data = None
             await asyncio.sleep(5)
+            continue
+        
+        # Check if polling is enabled (should_poll flag)
+        # This flag is set when user successfully logs in via OAuth callback
+        if not should_poll:
+            # Polling not enabled yet - wait a bit and check again
+            await asyncio.sleep(2)
             continue
         
         # We have an authenticated user and polling is enabled
@@ -640,7 +714,7 @@ def enable_polling():
     latest_data = None
     reset_baseline_greeks() # Clear in-memory baseline to force a reload from DB on next poll
     should_poll = True
-    print("✅ Polling enabled - will start fetching data")
+    print("✅ Polling enabled - will start fetching data with today's fresh tokens")
 
 
 def disable_polling():
@@ -677,13 +751,47 @@ def get_raw_option_chain() -> Optional[Dict]:
 
 async def get_current_authenticated_user() -> Optional[str]:
     """
-    Checks which user has a valid, active token and returns their username.
+    Checks which user has a valid, active token from TODAY and returns their username.
+    Tokens reset at midnight, so we only return users with today's tokens.
     """
     import time
+    from datetime import datetime, timezone, timedelta
+    
+    now_utc = datetime.now(timezone.utc)
+    now_ist = now_utc + timedelta(hours=5, minutes=30)
+    today_str = now_ist.strftime("%Y-%m-%d")
+    
     for user in ["samarth", "prajwal"]:
         tokens = await get_user_tokens(user)
-        if tokens:
-            # Check if token exists, is not null, and is not expired
-            if tokens.get("access_token") and tokens.get("token_expires_at", 0) > time.time():
-                return user
+        if not tokens or not tokens.get("access_token"):
+            continue
+        
+        # Check if token is from today (not yesterday)
+        updated_at = tokens.get("updated_at")
+        if updated_at:
+            try:
+                if isinstance(updated_at, datetime):
+                    if updated_at.tzinfo is not None:
+                        updated_utc = updated_at.astimezone(timezone.utc)
+                    else:
+                        updated_utc = updated_at.replace(tzinfo=timezone.utc)
+                    updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+                else:
+                    updated_dt = datetime.fromisoformat(str(updated_at).replace('Z', '+00:00'))
+                    if updated_dt.tzinfo is None:
+                        updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                    updated_utc = updated_dt.astimezone(timezone.utc)
+                    updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+                
+                token_date_str = updated_ist.strftime("%Y-%m-%d")
+                if token_date_str != today_str:
+                    # Token is from previous day, skip
+                    continue
+            except Exception:
+                # If we can't parse the date, skip this user
+                continue
+        
+        # Check if token is not expired
+        if tokens.get("token_expires_at", 0) > time.time():
+            return user
     return None

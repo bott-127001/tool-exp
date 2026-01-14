@@ -425,8 +425,8 @@ async def _do_oauth_login(user: str) -> Optional[str]:
 
 async def daily_token_refresh_scheduler():
     """
-    Background task that runs daily before 9:15 AM IST to refresh tokens.
-    Runs at 9:15 AM IST (03:45 UTC) to ensure tokens are ready for market open.
+    Background task that runs daily to refresh tokens.
+    Currently set to 12:00 PM IST (noon) for testing (normally 9:15 AM IST).
     """
     print("🕐 Daily token refresh scheduler started")
     
@@ -435,9 +435,9 @@ async def daily_token_refresh_scheduler():
             now_utc = datetime.now(timezone.utc)
             now_ist = now_utc + timedelta(hours=5, minutes=30)
             
-            # Target time: 9:15 AM IST (03:45 UTC)
-            target_hour = 9
-            target_minute = 15
+            # Target time: 12:00 PM IST (for testing - normally 9:15 AM IST)
+            target_hour = 12
+            target_minute = 18
             
 
             
@@ -468,26 +468,39 @@ async def daily_token_refresh_scheduler():
                 print(f"📅 Weekend detected ({now_ist_after_wait.strftime('%A')}). Skipping token refresh.")
                 continue
             
-            # Refresh tokens for all users
+            # Refresh tokens for samarth only (can feed both samarth and prajwal)
             print(f"\n🔄 Starting daily token refresh at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
-            for user in ["samarth", "prajwal"]:
-                try:
-                    # Run Selenium in thread pool to prevent worker timeout in production
-                    # Selenium operations are blocking, so we run them in a separate thread
-                    loop = asyncio.get_event_loop()
-                    success = await loop.run_in_executor(
-                        get_selenium_executor(),
-                        _run_selenium_login_sync,
-                        user
-                    )
-                    if success:
-                        print(f"✅ Successfully refreshed token for {user}")
-                    else:
-                        print(f"❌ Failed to refresh token for {user}")
-                except Exception as e:
-                    print(f"❌ Error refreshing token for {user}: {str(e)}")
-                    import traceback
-                    traceback.print_exc()
+            from database import mark_login_failure
+            from data_fetcher import enable_polling
+            
+            # Only login for samarth - this account can feed both samarth and prajwal
+            user = "samarth"
+            try:
+                # Run Selenium in thread pool to prevent worker timeout in production
+                # Selenium operations are blocking, so we run them in a separate thread
+                loop = asyncio.get_event_loop()
+                success = await loop.run_in_executor(
+                    get_selenium_executor(),
+                    _run_selenium_login_sync,
+                    user
+                )
+                if success:
+                    print(f"✅ Successfully refreshed token for {user}")
+                    print(f"ℹ️  This login feeds both samarth and prajwal accounts")
+                    # Enable polling after successful login
+                    enable_polling()
+                else:
+                    print(f"❌ Failed to refresh token for {user}")
+                    # Mark login failure in database for both users since samarth feeds both
+                    await mark_login_failure("samarth", f"Automated login failed at {target_hour:02d}:{target_minute:02d}")
+                    await mark_login_failure("prajwal", f"Automated login failed at {target_hour:02d}:{target_minute:02d}")
+            except Exception as e:
+                print(f"❌ Error refreshing token for {user}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                # Mark login failure in database for both users since samarth feeds both
+                await mark_login_failure("samarth", f"Error during automated login: {str(e)}")
+                await mark_login_failure("prajwal", f"Error during automated login: {str(e)}")
             
             print(f"✅ Daily token refresh completed\n")
             
