@@ -9,6 +9,10 @@ function Dashboard() {
   const [upstoxLoginStatus, setUpstoxLoginStatus] = useState(null)
   const [triggeringLogin, setTriggeringLogin] = useState(false)
   const [loginMessage, setLoginMessage] = useState('')
+  const [prevDayChecking, setPrevDayChecking] = useState(false)
+  const [prevDayMissing, setPrevDayMissing] = useState(false)
+  const [fetchingPrevDay, setFetchingPrevDay] = useState(false)
+  const [prevDayMessage, setPrevDayMessage] = useState('')
 
   const getTickCross = (match) => {
     return match ? <span className="tick">✓</span> : <span className="cross">✗</span>
@@ -151,12 +155,102 @@ function Dashboard() {
     }
   }
 
+  // After first successful data fetch, verify whether previous-day data exists.
+  // If auto-fetch (from backend) hasn't populated it, prompt user to fetch manually.
+  useEffect(() => {
+    const checkPreviousDayData = async () => {
+      if (!currentUser || !hasData || prevDayChecking || prevDayMissing) return
+      setPrevDayChecking(true)
+      try {
+        const response = await axios.get(`/api/settings/${currentUser}`)
+        const s = response.data || {}
+        const hasPrevDay =
+          s.prev_day_close !== undefined &&
+          s.prev_day_close !== null &&
+          s.prev_day_range !== undefined &&
+          s.prev_day_range !== null
+        setPrevDayMissing(!hasPrevDay)
+      } catch (error) {
+        console.error('Error checking previous day data:', error)
+        // If we can't confirm, err on the side of prompting the user.
+        setPrevDayMissing(true)
+      } finally {
+        setPrevDayChecking(false)
+      }
+    }
+
+    checkPreviousDayData()
+  }, [currentUser, hasData, prevDayChecking, prevDayMissing])
+
+  const handleFetchPreviousDayData = async () => {
+    if (!currentUser) {
+      setPrevDayMessage('Error: No user is logged in.')
+      return
+    }
+
+    try {
+      setFetchingPrevDay(true)
+      setPrevDayMessage('Fetching previous day data from Upstox...')
+
+      const sessionToken = localStorage.getItem('session_token')
+      const response = await axios.post('/api/fetch-previous-day-data', {}, {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        }
+      })
+
+      const data = response.data
+      setPrevDayMessage(`Previous day data fetched for ${data.prev_day_date}`)
+      setPrevDayMissing(false)
+    } catch (error) {
+      console.error('Error fetching previous day data:', error)
+      setPrevDayMessage(error.response?.data?.detail || 'Error fetching previous day data.')
+    } finally {
+      setFetchingPrevDay(false)
+    }
+  }
+
   return (
     <>
       <div className="card">
         <h2>Dashboard</h2>
         <p style={{ color: '#666', fontSize: '14px' }}></p>
       </div>
+
+      {/* Previous Day Data prompt & manual fetch control */}
+      {prevDayMissing && (
+        <div className="card" style={{ 
+          marginTop: '20px',
+          backgroundColor: '#e9f7ef',
+          border: '1px solid #28a745'
+        }}>
+          <h3>Previous Day Data</h3>
+          <p style={{ fontSize: '14px', color: '#155724' }}>
+            The system did not detect previous day OHLC data yet. This data is used for Opening
+            Location & Gap Acceptance calculations. You can fetch it manually from Upstox.
+          </p>
+          {prevDayMessage && (
+            <div style={{
+              padding: '8px',
+              marginBottom: '10px',
+              borderRadius: '4px',
+              backgroundColor: prevDayMessage.includes('Error') ? '#f8d7da' : '#d4edda',
+              color: prevDayMessage.includes('Error') ? '#721c24' : '#155724',
+              fontSize: '13px'
+            }}>
+              {prevDayMessage}
+            </div>
+          )}
+          <button
+            onClick={handleFetchPreviousDayData}
+            disabled={fetchingPrevDay}
+            className="btn"
+            style={{ backgroundColor: '#007bff', color: 'white', border: 'none' }}
+          >
+            {fetchingPrevDay ? 'Fetching...' : 'Fetch Previous Day Data from Upstox'}
+          </button>
+        </div>
+      )}
 
       {/* Upstox Login Status Card */}
       {upstoxLoginStatus && (!upstoxLoginStatus.logged_in_today || upstoxLoginStatus.login_failed_today) && (
