@@ -7,7 +7,17 @@ import asyncio
 from typing import Optional
 from urllib.parse import urlencode
 from dotenv import load_dotenv
-from database import store_tokens, get_user_tokens, clear_user_tokens, verify_frontend_user, create_frontend_user
+from database import (
+    store_tokens,
+    get_user_tokens,
+    clear_user_tokens,
+    verify_frontend_user,
+    create_frontend_user,
+    create_frontend_session,
+    get_frontend_session,
+    delete_frontend_session,
+    delete_expired_frontend_sessions,
+)
 from datetime import datetime, timezone, timedelta
 import time
 
@@ -385,8 +395,7 @@ async def refresh_access_token(username: str) -> Optional[str]:
 
 
 # Frontend authentication (separate from Upstox OAuth)
-# Store active frontend sessions in memory (or use Redis in production)
-frontend_sessions: dict[str, dict] = {}  # {session_token: {username, expires_at}}
+# Sessions are stored in MongoDB so they work across multiple workers/instances.
 
 
 @auth_router.post("/frontend-login")
@@ -420,10 +429,7 @@ async def frontend_login(request: Request):
         import time
         expires_at = time.time() + (24 * 60 * 60)  # 24 hours
         
-        frontend_sessions[session_token] = {
-            "username": username,
-            "expires_at": expires_at
-        }
+        await create_frontend_session(session_token=session_token, username=username, expires_at=expires_at)
         
         print(f"✅ Frontend login successful for {username}")
         return JSONResponse(content={
@@ -446,9 +452,10 @@ async def frontend_logout(request: Request):
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             session_token = auth_header.split("Bearer ")[1]
-            if session_token in frontend_sessions:
-                username = frontend_sessions[session_token]["username"]
-                del frontend_sessions[session_token]
+            session = await get_frontend_session(session_token)
+            if session:
+                username = session.get("username")
+                await delete_frontend_session(session_token)
                 print(f"✅ Frontend logout successful for {username}")
                 return JSONResponse(content={"success": True, "message": "Logged out"})
         
@@ -467,18 +474,24 @@ async def frontend_check(request: Request):
             return JSONResponse(content={"authenticated": False})
         
         session_token = auth_header.split("Bearer ")[1]
-        
-        if session_token in frontend_sessions:
-            session = frontend_sessions[session_token]
-            import time
-            if session["expires_at"] > time.time():
+
+        import time
+        # Opportunistic cleanup (best-effort)
+        try:
+            await delete_expired_frontend_sessions(time.time())
+        except Exception:
+            pass
+
+        session = await get_frontend_session(session_token)
+        if session:
+            if session.get("expires_at", 0) > time.time():
                 return JSONResponse(content={
                     "authenticated": True,
-                    "username": session["username"]
+                    "username": session.get("username")
                 })
             else:
                 # Session expired, remove it
-                del frontend_sessions[session_token]
+                await delete_frontend_session(session_token)
         
         return JSONResponse(content={"authenticated": False})
     except Exception as e:
@@ -488,17 +501,22 @@ async def frontend_check(request: Request):
 
 def get_frontend_user_from_token(session_token: Optional[str]) -> Optional[str]:
     """Helper function to get username from session token"""
+    # NOTE: This helper is used by async endpoints; keep it sync-safe by returning None here.
+    # Callers should use `get_frontend_user_from_token_async` instead.
+    return None
+
+
+async def get_frontend_user_from_token_async(session_token: Optional[str]) -> Optional[str]:
+    """Async helper to get username from session token (Mongo-backed)."""
     if not session_token:
         return None
-    
-    if session_token in frontend_sessions:
-        session = frontend_sessions[session_token]
-        import time
-        if session["expires_at"] > time.time():
-            return session["username"]
-        else:
-            del frontend_sessions[session_token]
-    
+    import time
+    session = await get_frontend_session(session_token)
+    if not session:
+        return None
+    if session.get("expires_at", 0) > time.time():
+        return session.get("username")
+    await delete_frontend_session(session_token)
     return None
 
 
@@ -515,7 +533,7 @@ async def check_upstox_login_status(request: Request):
             raise HTTPException(status_code=401, detail="Not authenticated")
         
         session_token = auth_header.split("Bearer ")[1]
-        username = get_frontend_user_from_token(session_token)
+        username = await get_frontend_user_from_token_async(session_token)
         
         if not username:
             raise HTTPException(status_code=401, detail="Invalid session")
@@ -626,7 +644,7 @@ async def trigger_upstox_login(request: Request):
             raise HTTPException(status_code=401, detail="Not authenticated")
         
         session_token = auth_header.split("Bearer ")[1]
-        username = get_frontend_user_from_token(session_token)
+        username = await get_frontend_user_from_token_async(session_token)
         
         if not username:
             raise HTTPException(status_code=401, detail="Invalid session")

@@ -36,6 +36,7 @@ settings_collection = db.get_collection("user_settings")
 trade_logs_collection = db.get_collection("trade_logs")
 market_data_log_collection = db.get_collection("market_data_log")
 frontend_users_collection = db.get_collection("frontend_users")
+frontend_sessions_collection = db.get_collection("frontend_sessions")
 
 async def init_db():
     """Initialize database indexes and default settings."""
@@ -57,6 +58,8 @@ async def init_db():
     await trade_logs_collection.create_index([("username", 1), ("timestamp", -1)])
     await market_data_log_collection.create_index("timestamp")
     await frontend_users_collection.create_index("username", unique=True)
+    await frontend_sessions_collection.create_index("session_token", unique=True)
+    await frontend_sessions_collection.create_index("expires_at")
 
     # Initialize frontend users
     await init_frontend_users()
@@ -103,6 +106,44 @@ async def store_tokens(username: str, access_token: str, refresh_token: str, exp
         },
         upsert=True
     )
+
+
+async def create_frontend_session(session_token: str, username: str, expires_at: float):
+    """Create/update a frontend session token in persistent storage."""
+    await frontend_sessions_collection.update_one(
+        {"session_token": session_token},
+        {
+            "$set": {
+                "session_token": session_token,
+                "username": username,
+                "expires_at": expires_at,
+                "updated_at": datetime.utcnow(),
+            },
+            "$setOnInsert": {"created_at": datetime.utcnow()},
+        },
+        upsert=True,
+    )
+
+
+async def get_frontend_session(session_token: str) -> Optional[Dict]:
+    """Fetch a frontend session by token."""
+    if not session_token:
+        return None
+    return await frontend_sessions_collection.find_one({"session_token": session_token})
+
+
+async def delete_frontend_session(session_token: str) -> bool:
+    """Delete a frontend session by token. Returns True if something was deleted."""
+    if not session_token:
+        return False
+    res = await frontend_sessions_collection.delete_one({"session_token": session_token})
+    return res.deleted_count > 0
+
+
+async def delete_expired_frontend_sessions(now_ts: float) -> int:
+    """Best-effort cleanup: delete expired sessions. Returns count deleted."""
+    res = await frontend_sessions_collection.delete_many({"expires_at": {"$lte": now_ts}})
+    return int(res.deleted_count or 0)
 
 
 async def mark_login_failure(username: str, error_message: str = None):
