@@ -159,16 +159,6 @@ async def websocket_endpoint(websocket: WebSocket):
             pass
 
 
-@app.get("/test-ws")
-async def test_ws():
-    """Test endpoint to verify server is running"""
-    return {
-        "status": "ok",
-        "websocket_endpoint": "ws://localhost:8000/ws",
-        "active_connections": len(manager.active_connections)
-    }
-
-
 @app.get("/api/auth/current-user")
 async def get_current_user():
     """
