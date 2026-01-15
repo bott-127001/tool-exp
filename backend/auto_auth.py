@@ -470,11 +470,56 @@ async def daily_token_refresh_scheduler():
             
             # Refresh tokens for samarth only (can feed both samarth and prajwal)
             print(f"\n🔄 Starting daily token refresh at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
-            from database import mark_login_failure
+            from database import mark_login_failure, get_user_tokens
             from data_fetcher import enable_polling
             
             # Only login for samarth - this account can feed both samarth and prajwal
             user = "samarth"
+            
+            # Check if tokens already exist from today (e.g., from manual login)
+            today_str = now_ist_after_wait.strftime("%Y-%m-%d")
+            existing_tokens = await get_user_tokens(user)
+            if existing_tokens and existing_tokens.get("access_token"):
+                updated_at = existing_tokens.get("updated_at")
+                if updated_at:
+                    try:
+                        # Convert to IST for comparison
+                        if isinstance(updated_at, datetime):
+                            if updated_at.tzinfo is not None:
+                                updated_utc = updated_at.astimezone(timezone.utc)
+                            else:
+                                updated_utc = updated_at.replace(tzinfo=timezone.utc)
+                            updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+                        else:
+                            updated_dt = datetime.fromisoformat(str(updated_at).replace('Z', '+00:00'))
+                            if updated_dt.tzinfo is None:
+                                updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                            updated_utc = updated_dt.astimezone(timezone.utc)
+                            updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+                        
+                        token_date_str = updated_ist.strftime("%Y-%m-%d")
+                        if token_date_str == today_str:
+                            # Check if token is still valid (not expired)
+                            import time
+                            token_expires_at = existing_tokens.get("token_expires_at", 0)
+                            if token_expires_at > time.time():
+                                print(f"✓ Tokens already exist for {user} from today and are still valid. Skipping automated login.")
+                                print(f"ℹ️  This login feeds both samarth and prajwal accounts")
+                                # Enable polling if not already enabled
+                                enable_polling()
+                                print(f"✅ Daily token refresh completed (skipped - tokens already valid)\n")
+                                continue
+                            else:
+                                print(f"⚠️  Tokens exist for {user} from today but are expired. Proceeding with automated login...")
+                        else:
+                            print(f"⚠️  Tokens exist for {user} but are from {token_date_str}, not today. Proceeding with automated login...")
+                    except Exception as e:
+                        print(f"⚠️  Error checking existing tokens: {e}. Proceeding with automated login...")
+                else:
+                    print(f"⚠️  Tokens exist for {user} but no updated_at timestamp. Proceeding with automated login...")
+            else:
+                print(f"ℹ️  No existing tokens found for {user}. Proceeding with automated login...")
+            
             try:
                 # Run Selenium in thread pool to prevent worker timeout in production
                 # Selenium operations are blocking, so we run them in a separate thread

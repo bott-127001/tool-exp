@@ -97,15 +97,11 @@ async def fetch_option_chain(username: str) -> Optional[Dict]:
     token_expires_at = tokens.get("token_expires_at", 0)
     if not access_token or token_expires_at <= (time.time() + 60):
         if token_expires_at <= time.time():
-            print(f"Token expired for user: {username}")
+            print(f"❌ Token expired for user: {username} (expired at 3 AM IST). User needs to re-login.")
         else:
-            print(f"Token expiring soon for user: {username}, refreshing proactively")
-        # Only try to refresh if token is from today
-        new_access_token = await refresh_access_token(username)
-        if not new_access_token:
-            print(f"❌ Failed to refresh token for {username}. User needs to log in again.")
-            return None
-        access_token = new_access_token
+            print(f"⚠️  Token expiring soon for user: {username} (expires at 3 AM IST). User should re-login.")
+        # Upstox doesn't support refresh tokens - user must re-login
+        return None
     
     headers = {
         "Authorization": f"Bearer {access_token}",

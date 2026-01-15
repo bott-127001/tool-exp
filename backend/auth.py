@@ -8,11 +8,37 @@ from typing import Optional
 from urllib.parse import urlencode
 from dotenv import load_dotenv
 from database import store_tokens, get_user_tokens, clear_user_tokens, verify_frontend_user, create_frontend_user
+from datetime import datetime, timezone, timedelta
+import time
 
 # Load environment variables from .env file
 load_dotenv()
 
 auth_router = APIRouter()
+
+
+def calculate_token_expiration_3am_ist() -> int:
+    """
+    Calculate token expiration time as 3 AM IST on the next day.
+    Upstox tokens expire at 3 AM IST daily regardless of when they're generated.
+    """
+    now_utc = datetime.now(timezone.utc)
+    now_ist = now_utc + timedelta(hours=5, minutes=30)
+    
+    # If it's before 3 AM IST today, expire at 3 AM today
+    # Otherwise, expire at 3 AM tomorrow
+    if now_ist.hour < 3:
+        # Expire at 3 AM today
+        expiration_ist = now_ist.replace(hour=3, minute=0, second=0, microsecond=0)
+    else:
+        # Expire at 3 AM tomorrow
+        expiration_ist = (now_ist + timedelta(days=1)).replace(hour=3, minute=0, second=0, microsecond=0)
+    
+    # Convert back to UTC
+    expiration_utc = (expiration_ist - timedelta(hours=5, minutes=30)).replace(tzinfo=timezone.utc)
+    
+    # Return as Unix timestamp
+    return int(expiration_utc.timestamp())
 
 # Upstox OAuth credentials for each user
 # TODO: Replace with actual credentials from environment variables or config
@@ -246,8 +272,6 @@ async def callback( # This function is already async, which is great
             token_data = response.json()
             
             access_token = token_data.get("access_token")
-            refresh_token = token_data.get("refresh_token")
-            expires_in = token_data.get("expires_in", 3600)
             
             if not access_token:
                 return HTMLResponse(
@@ -263,19 +287,12 @@ async def callback( # This function is already async, which is great
                     status_code=400
                 )
             
-            # If refresh token is not provided, try to get existing one from database
-            if not refresh_token:
-                print(f"⚠️  No refresh token in response for {state}, checking existing tokens...")
-                existing_tokens = await get_user_tokens(state)
-                if existing_tokens and existing_tokens.get("refresh_token"):
-                    refresh_token = existing_tokens["refresh_token"]
-                    print(f"✓ Using existing refresh token for {state}")
-                else:
-                    print(f"⚠️  No existing refresh token found for {state}. Token refresh may not work.")
+            # Upstox doesn't provide refresh tokens, so we always use empty string
+            # Tokens expire at 3 AM IST daily regardless of generation time
+            refresh_token = ""
             
-            # Calculate expiration timestamp
-            import time
-            expires_at = int(time.time()) + expires_in
+            # Calculate expiration timestamp - always 3 AM IST next day
+            expires_at = calculate_token_expiration_3am_ist()
             
             # Store tokens in database
             await store_tokens(state, access_token, refresh_token or "", expires_at)
@@ -296,10 +313,13 @@ async def callback( # This function is already async, which is great
             enable_polling()
             
             # Redirect to frontend dashboard with status code 302
+            # Calculate time until expiration for logging
+            expires_in_seconds = expires_at - int(time.time())
+            expires_in_hours = expires_in_seconds / 3600
+            
             print(f"✓ Authentication successful for user: {state}")
             print(f"✓ Access token stored: {access_token[:20]}...")
-            print(f"✓ Refresh token stored: {refresh_token[:20] if refresh_token else 'None'}...")
-            print(f"✓ Token expires at: {expires_at} (in {expires_in} seconds)")
+            print(f"✓ Token expires at 3 AM IST (in {expires_in_hours:.1f} hours)")
             print(f"✓ Token storage verified in database")
             print(f"✓ Polling enabled - data fetching will start immediately")
             print(f"✓ Redirecting to dashboard...")
@@ -355,82 +375,13 @@ async def logout():
 
 async def refresh_access_token(username: str) -> Optional[str]:
     """
-    Refresh the access token using the stored refresh token.
-    Returns the new access token if successful, otherwise None.
-    Note: This should only be called for tokens from today, as tokens reset at midnight.
+    Upstox tokens cannot be refreshed - they expire at 3 AM IST daily.
+    This function is kept for compatibility but always returns None.
+    Users must re-login when tokens expire.
     """
-    print(f"🔄 Attempting to refresh token for user: {username}")
-    
-    user_tokens = await get_user_tokens(username)
-    if not user_tokens or not user_tokens.get("refresh_token"):
-        print(f"❌ No refresh token found for {username}. Cannot refresh.")
-        return None
-    
-    # Check if token is from today (tokens reset at midnight)
-    from datetime import datetime, timezone, timedelta
-    now_utc = datetime.now(timezone.utc)
-    now_ist = now_utc + timedelta(hours=5, minutes=30)
-    today_str = now_ist.strftime("%Y-%m-%d")
-    
-    updated_at = user_tokens.get("updated_at")
-    if updated_at:
-        try:
-            if isinstance(updated_at, datetime):
-                if updated_at.tzinfo is not None:
-                    updated_utc = updated_at.astimezone(timezone.utc)
-                else:
-                    updated_utc = updated_at.replace(tzinfo=timezone.utc)
-                updated_ist = updated_utc + timedelta(hours=5, minutes=30)
-            else:
-                updated_dt = datetime.fromisoformat(str(updated_at).replace('Z', '+00:00'))
-                if updated_dt.tzinfo is None:
-                    updated_dt = updated_dt.replace(tzinfo=timezone.utc)
-                updated_utc = updated_dt.astimezone(timezone.utc)
-                updated_ist = updated_utc + timedelta(hours=5, minutes=30)
-            
-            token_date_str = updated_ist.strftime("%Y-%m-%d")
-            if token_date_str != today_str:
-                print(f"⏳ Token for {username} is from {token_date_str}, not today. Cannot refresh old tokens. Wait for new login.")
-                return None
-        except Exception as e:
-            print(f"⚠️  Error checking token date: {e}")
-            # If we can't parse, don't try to refresh
-            return None
-
-    credentials = USER_CREDENTIALS.get(username)
-    if not credentials:
-        print(f"❌ No credentials found for {username}.")
-        return None
-
-    payload = {
-        "client_id": credentials["client_id"],
-        "client_secret": credentials["client_secret"],
-        "refresh_token": user_tokens["refresh_token"],
-        "grant_type": "refresh_token"
-    }
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            UPSTOX_TOKEN_URL,
-            data=payload,
-            headers={"Accept": "application/json"}
-        )
-
-    if response.status_code != 200:
-        print(f"❌ Token refresh failed for {username}: {response.status_code} - {response.text}")
-        # Potentially clear tokens here if refresh token is invalid
-        return None
-
-    new_token_data = response.json()
-    new_access_token = new_token_data["access_token"]
-    new_expires_at = int(time.time()) + new_token_data["expires_in"]
-    
-    # Store the new tokens. Note: Upstox might not return a new refresh token.
-    # If a new refresh token is provided, use it; otherwise keep the existing one
-    new_refresh_token = new_token_data.get("refresh_token") or user_tokens["refresh_token"]
-    await store_tokens(username, new_access_token, new_refresh_token, new_expires_at)
-    print(f"✅ Token refreshed successfully for {username}")
-    return new_access_token
+    print(f"⚠️  Token refresh attempted for {username}, but Upstox doesn't support refresh tokens.")
+    print(f"⚠️  Tokens expire at 3 AM IST daily. User needs to re-login.")
+    return None
 
 
 # Frontend authentication (separate from Upstox OAuth)
