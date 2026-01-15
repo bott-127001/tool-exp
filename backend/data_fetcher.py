@@ -1,8 +1,8 @@
 import httpx
 import asyncio
 from typing import Optional, Dict, List
-from datetime import datetime, timedelta, timezone
-from database import get_user_settings, get_user_tokens, log_signal, db
+from datetime import datetime, timedelta, timezone, date
+from database import get_user_settings, get_user_tokens, log_signal, db, update_user_settings
 from calc import find_atm_strike
 from auth import refresh_access_token
 from greek_signals import detect_signals
@@ -50,6 +50,129 @@ from ws_manager import manager # Import the shared manager instance
 # Upstox API endpoints
 UPSTOX_BASE_URL = "https://api.upstox.com/v2"
 UPSTOX_OPTION_CHAIN_URL = f"{UPSTOX_BASE_URL}/option/chain"
+
+# Upstox V3 base URL for historical candles
+UPSTOX_BASE_URL_V3 = "https://api.upstox.com/v3"
+
+
+def get_last_trading_day(current_dt_ist: datetime) -> str:
+    """
+    Get the last trading day in YYYY-MM-DD (IST), skipping weekends.
+    - If today is Mon-Fri, returns yesterday.
+    - If today is Monday, returns Friday.
+    - If today is Saturday/Sunday, walks back to Friday/Thursday respectively.
+    """
+    # Work with date in IST
+    d: date = current_dt_ist.date()
+    # Step back at least one day
+    d = d - timedelta(days=1)
+    # Walk back over weekend days
+    while d.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        d = d - timedelta(days=1)
+    return d.strftime("%Y-%m-%d")
+
+
+async def fetch_previous_day_ohlc(username: str, instrument_key: str, target_date: str) -> Optional[Dict]:
+    """
+    Fetch previous day's OHLC data for a given instrument using Upstox Historical Candle Data V3.
+    Returns: { 'high': float, 'low': float, 'close': float, 'range': float, 'date': str } or None on failure.
+    """
+    tokens = await get_user_tokens(username)
+    if not tokens:
+        print(f"No tokens found for user: {username} (fetch_previous_day_ohlc)")
+        return None
+
+    # Check token validity (same rules as option chain)
+    now_utc = datetime.now(timezone.utc)
+    now_ist = now_utc + timedelta(hours=5, minutes=30)
+    today_str = now_ist.strftime("%Y-%m-%d")
+
+    updated_at = tokens.get("updated_at")
+    if updated_at:
+        try:
+            if isinstance(updated_at, datetime):
+                if updated_at.tzinfo is not None:
+                    updated_utc = updated_at.astimezone(timezone.utc)
+                else:
+                    updated_utc = updated_at.replace(tzinfo=timezone.utc)
+                updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+            else:
+                updated_dt = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+                if updated_dt.tzinfo is None:
+                    updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                updated_utc = updated_dt.astimezone(timezone.utc)
+                updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+
+            token_date_str = updated_ist.strftime("%Y-%m-%d")
+            if token_date_str != today_str:
+                print(f"⏳ Token for {username} is from {token_date_str}, not today. Cannot fetch previous-day OHLC.")
+                return None
+        except Exception as e:
+            print(f"⚠️  Error checking token date for previous-day OHLC: {e}")
+            return None
+
+    # Check token expiration
+    import time
+
+    access_token = tokens.get("access_token")
+    token_expires_at = tokens.get("token_expires_at", 0)
+    if not access_token or token_expires_at <= (time.time() + 60):
+        print(f"❌ Token not valid for {username} when fetching previous-day OHLC.")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+    }
+
+    # V3 historical candle endpoint:
+    # /v3/historical-candle/{instrument_key}/days/1/{from_date}/{to_date}
+    # Use same date for from/to to get single daily candle
+    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/{instrument_key}/days/1/{target_date}/{target_date}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, headers=headers)
+
+        if response.status_code != 200:
+            print(f"API Error (historical candles): {response.status_code} - {response.text}")
+            return None
+
+        data = response.json()
+        if data.get("status") != "success":
+            print(f"Historical candle API returned error status: {data}")
+            return None
+
+        candles = data.get("data", {}).get("candles", [])
+        if not candles:
+            print(f"No candles returned for {instrument_key} on {target_date}")
+            return None
+
+        # Candle format: [timestamp, open, high, low, close, volume, oi]
+        candle = candles[0]
+        if len(candle) < 5:
+            print(f"Unexpected candle format for {instrument_key} on {target_date}: {candle}")
+            return None
+
+        _, o, h, l, c = candle[:5]
+        high = float(h)
+        low = float(l)
+        close = float(c)
+        rng = high - low
+
+        return {
+            "high": high,
+            "low": low,
+            "close": close,
+            "range": rng,
+            "date": target_date,
+        }
+    except Exception as e:
+        print(f"Error fetching previous-day OHLC for {instrument_key} on {target_date}: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return None
 
 
 async def fetch_option_chain(username: str) -> Optional[Dict]:
@@ -395,6 +518,44 @@ def get_price_15min_ago(current_time: datetime) -> Optional[float]:
     
     return None
 
+async def fetch_and_store_previous_day_data(username: str) -> Optional[Dict]:
+    """
+    Fetch previous day's OHLC for NIFTY 50 and store in user settings.
+    Returns the stored payload on success, or None on failure.
+    """
+    # Determine last trading day in IST
+    now_utc = datetime.now(timezone.utc)
+    now_ist = now_utc + timedelta(hours=5, minutes=30)
+    last_trading_day = get_last_trading_day(now_ist)
+
+    instrument_key = "NSE_INDEX|Nifty 50"
+    ohlc = await fetch_previous_day_ohlc(username, instrument_key, last_trading_day)
+    if not ohlc:
+        print(f"❌ Failed to fetch previous-day OHLC for {username} on {last_trading_day}")
+        return None
+
+    # Update user settings with prev_day_* fields
+    settings_update = {
+        "prev_day_close": ohlc["close"],
+        "prev_day_range": ohlc["range"],
+        "prev_day_date": ohlc["date"],
+    }
+    updated = await update_user_settings(username, settings_update)
+    if not updated:
+        print(f"❌ Failed to update settings with previous-day data for {username}")
+        return None
+
+    print(
+        f"✅ Previous-day data stored for {username} - "
+        f"date={ohlc['date']}, high={ohlc['high']}, low={ohlc['low']}, close={ohlc['close']}, range={ohlc['range']}"
+    )
+    return ohlc
+
+
+# Track which date we've already fetched previous-day stats for (per user)
+_prev_day_stats_fetched_for: Dict[str, str] = {}
+
+
 async def polling_worker():
     """Background worker that polls Upstox API every 5 seconds"""
     global latest_data, raw_option_chain, polling_active, should_poll, baseline_greeks
@@ -545,7 +706,7 @@ async def polling_worker():
                 
                 # We have valid normalized data with options
                 try:
-                    # NEW: Use the updated aggregation logic (ATM + 10 OTM)
+                        # NEW: Use the updated aggregation logic (ATM + 10 OTM)
                     aggregated = aggregate_greeks_atm_otm(normalized_data)
 
                     # Set baseline if it's not already set (from DB or previous poll)
@@ -664,6 +825,25 @@ async def polling_worker():
                         "volatility_metrics": volatility_metrics,  # Volatility-permission model data
                         "direction_metrics": direction_metrics,    # Direction & Asymmetry model data
                     }
+
+                    # After first successful poll of the day for this user, auto-fetch previous-day stats
+                    try:
+                        now_utc = datetime.now(timezone.utc)
+                        now_ist = now_utc + timedelta(hours=5, minutes=30)
+                        today_str = now_ist.strftime("%Y-%m-%d")
+                        last_fetched_date = _prev_day_stats_fetched_for.get(current_user)
+
+                        if last_fetched_date != today_str:
+                            ohlc = await fetch_and_store_previous_day_data(current_user)
+                            if ohlc:
+                                _prev_day_stats_fetched_for[current_user] = today_str
+                            else:
+                                print(
+                                    f"⚠️  Auto-fetch of previous-day data failed for {current_user}. "
+                                    f"Manual fetch can be triggered from Settings."
+                                )
+                    except Exception as e:
+                        print(f"⚠️  Error in auto-fetching previous-day data for {current_user}: {e}")
                     
                     # Broadcast to WebSocket clients
                     if manager:

@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv() 
 
-from auth import auth_router
+from auth import auth_router, get_frontend_user_from_token_async
 from database import init_db, get_user_settings, update_user_settings
 from ws_manager import manager # Import the shared manager instance
 from data_fetcher import start_polling, stop_polling, get_latest_data, get_current_authenticated_user, clear_daily_baseline
@@ -70,22 +70,29 @@ async def lifespan(app: FastAPI):
         # Start automated token refresh scheduler (runs daily at 9:15 AM IST)
         from auto_auth import daily_token_refresh_scheduler
         token_refresh_task = asyncio.create_task(daily_token_refresh_scheduler())
+        
+        # Start daily cleanup scheduler (runs daily at 3:00 AM IST)
+        from daily_cleanup import daily_cleanup_scheduler
+        cleanup_task = asyncio.create_task(daily_cleanup_scheduler())
     else:
         # This is a duplicate worker, just initialize DB
         print("Database initialized (worker process)")
         polling_task = None
         token_refresh_task = None
+        cleanup_task = None
     
     yield
     
     # Shutdown
-    if polling_task is not None and token_refresh_task is not None:
+    if polling_task is not None and token_refresh_task is not None and cleanup_task is not None:
         await stop_polling()
         polling_task.cancel()
         token_refresh_task.cancel()
+        cleanup_task.cancel()
         try:
             await polling_task
             await token_refresh_task
+            await cleanup_task
         except asyncio.CancelledError:
             pass
 
@@ -301,6 +308,40 @@ async def clear_market_data():
     from database import market_data_log_collection
     result = await market_data_log_collection.delete_many({})
     return {"message": f"Successfully deleted {result.deleted_count} records."}
+
+
+@app.post("/api/fetch-previous-day-data")
+async def fetch_previous_day_data(request: Request):
+    """
+    Manually trigger fetch of previous day's OHLC data for the current frontend user.
+    Uses Upstox Historical Candle Data V3 under the hood and stores values in user settings.
+    """
+    # Frontend authentication via session token
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    session_token = auth_header.split("Bearer ")[1]
+    username = await get_frontend_user_from_token_async(session_token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid session")
+
+    # Fetch and store previous-day data
+    from data_fetcher import fetch_and_store_previous_day_data
+
+    ohlc = await fetch_and_store_previous_day_data(username)
+    if not ohlc:
+        raise HTTPException(status_code=500, detail="Failed to fetch previous-day data from Upstox")
+
+    return {
+        "success": True,
+        "username": username,
+        "prev_day_close": ohlc["close"],
+        "prev_day_high": ohlc["high"],
+        "prev_day_low": ohlc["low"],
+        "prev_day_range": ohlc["range"],
+        "prev_day_date": ohlc["date"],
+    }
 
 
 # --- Static Files and Catch-all ---

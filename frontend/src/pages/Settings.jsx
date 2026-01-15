@@ -23,6 +23,8 @@ function Settings() {
   const { currentUser } = useAuth();
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const [fetchingPrevDay, setFetchingPrevDay] = useState(false)
+  const [prevDayInfo, setPrevDayInfo] = useState(null)
 
   useEffect(() => {
     // Since this is a protected route, we can safely assume currentUser will be available.
@@ -112,6 +114,52 @@ function Settings() {
       setMessage('Error clearing data.');
     }
   };
+
+  const handleFetchPreviousDayData = async () => {
+    if (!currentUser) {
+      setMessage('Error: No user is logged in.')
+      return
+    }
+
+    try {
+      setFetchingPrevDay(true)
+      setMessage('Fetching previous day data from Upstox...')
+
+      // Use the same session token that frontend uses for auth
+      const sessionToken = localStorage.getItem('session_token')
+      const response = await axios.post('/api/fetch-previous-day-data', {}, {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        }
+      })
+
+      const data = response.data
+
+      // Update settings with new values
+      setSettings(prev => ({
+        ...prev,
+        prev_day_close: data.prev_day_close,
+        prev_day_range: data.prev_day_range,
+        prev_day_date: data.prev_day_date,
+      }))
+
+      setPrevDayInfo({
+        date: data.prev_day_date,
+        high: data.prev_day_high,
+        low: data.prev_day_low,
+        close: data.prev_day_close,
+        range: data.prev_day_range,
+      })
+
+      setMessage(`Previous day data fetched for ${data.prev_day_date}`)
+      setTimeout(() => setMessage(''), 4000)
+    } catch (error) {
+      console.error('Error fetching previous day data:', error)
+      setMessage(error.response?.data?.detail || 'Error fetching previous day data.')
+    } finally {
+      setFetchingPrevDay(false)
+    }
+  }
 
   
         
@@ -328,9 +376,34 @@ function Settings() {
 
           <h3>Previous Day Inputs (Optional)</h3>
           <p style={{ marginBottom: '10px', color: '#666', fontSize: '14px' }}>
-            Use these only when previous day data is not available from the broker. They feed into the
-            Opening Location & Gap Acceptance calculations.
+            These feed into the Opening Location & Gap Acceptance calculations. The system will
+            auto-fetch previous day data after the first successful poll of the day. You can also
+            fetch manually using the button below.
           </p>
+
+          <button
+            type="button"
+            className="btn"
+            onClick={handleFetchPreviousDayData}
+            disabled={fetchingPrevDay}
+            style={{ marginBottom: '15px' }}
+          >
+            {fetchingPrevDay ? 'Fetching...' : 'Fetch Previous Day Data from Upstox'}
+          </button>
+
+          {prevDayInfo && (
+            <div style={{
+              fontSize: '13px',
+              marginBottom: '10px',
+              padding: '8px',
+              backgroundColor: '#e9f7ef',
+              borderRadius: '4px',
+              color: '#155724'
+            }}>
+              Auto-fetched for {prevDayInfo.date} — High: {prevDayInfo.high.toFixed(2)}, Low: {prevDayInfo.low.toFixed(2)},
+              Close: {prevDayInfo.close.toFixed(2)}, Range: {prevDayInfo.range.toFixed(2)}
+            </div>
+          )}
 
           <div className="form-group">
             <label htmlFor="prev_day_close">Previous Day Close</label>

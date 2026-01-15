@@ -223,8 +223,14 @@ async def log_market_data(data: dict):
         "timestamp": datetime.fromisoformat(data.get('timestamp')),
         "underlying_price": data.get('underlying_price'),
         "atm_strike": data.get('atm_strike'),
-        "aggregated_greeks": data.get('aggregated_greeks', {}),
-        "signals": data.get('signals', [])
+        "expiry_date": data.get('expiry_date'),
+        "aggregated_greeks": data.get("aggregated_greeks", {}),
+        "baseline_greeks": data.get("baseline_greeks", {}),
+        "change_from_baseline": data.get("change_from_baseline", {}),
+        "signals": data.get("signals", []),
+        "volatility_metrics": data.get("volatility_metrics", {}),
+        "direction_metrics": data.get("direction_metrics", {}),
+        "option_count": data.get("option_count", 0)
     }
     await market_data_log_collection.insert_one(log_entry)
 
