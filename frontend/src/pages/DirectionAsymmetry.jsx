@@ -1,17 +1,8 @@
-import React, { useEffect, useState } from 'react'
-import axios from 'axios'
+import React from 'react'
 import { useData } from './DataContext'
-import { useAuth } from './AuthContext'
 
 function DirectionAsymmetry() {
   const { data } = useData()
-  const { currentUser } = useAuth()
-
-  const [prevDayClose, setPrevDayClose] = useState('')
-  const [prevDayRange, setPrevDayRange] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [saveMsg, setSaveMsg] = useState('')
-  const [lastSavedDate, setLastSavedDate] = useState('')
 
   const directionData = data.direction_metrics || {}
   const volatilityData = data.volatility_metrics || {}
@@ -28,87 +19,6 @@ function DirectionAsymmetry() {
     data.underlying_price !== null &&
     data.underlying_price !== undefined &&
     Object.keys(directionData).length > 0
-
-  useEffect(() => {
-    const fetchPrevDayInputs = async () => {
-      if (!currentUser) return
-      try {
-        const res = await axios.get(`/api/settings/${currentUser}`)
-        if (res.data) {
-          setPrevDayClose(
-            res.data.prev_day_close !== null && res.data.prev_day_close !== undefined
-              ? res.data.prev_day_close
-              : ''
-          )
-          setPrevDayRange(
-            res.data.prev_day_range !== null && res.data.prev_day_range !== undefined
-              ? res.data.prev_day_range
-              : ''
-          )
-          setLastSavedDate(res.data.prev_day_date || '')
-        }
-      } catch (err) {
-        console.error('Failed to load previous-day inputs', err)
-      }
-    }
-    fetchPrevDayInputs()
-  }, [currentUser])
-
-  const handleSavePrevDayInputs = async (e) => {
-    e.preventDefault()
-    if (!currentUser) {
-      setSaveMsg('Not logged in. Please re-login.')
-      return
-    }
-    setSaving(true)
-    setSaveMsg('')
-    try {
-      // prev_day_date should be yesterday's date (the date for which the previous day data is valid)
-      const yesterday = new Date()
-      yesterday.setDate(yesterday.getDate() - 1)
-      const prevDayDateIso = yesterday.toISOString().slice(0, 10)
-      
-      const closeValue = prevDayClose === '' ? null : parseFloat(prevDayClose)
-      const rangeValue = prevDayRange === '' ? null : parseFloat(prevDayRange)
-      
-      await axios.put(`/api/settings/${currentUser}`, {
-        prev_day_close: closeValue,
-        prev_day_range: rangeValue,
-        prev_day_date: prevDayDateIso,
-      })
-      
-      // Update local state immediately
-      setLastSavedDate(prevDayDateIso)
-      // Ensure values are set correctly (handle empty strings)
-      if (closeValue !== null) {
-        setPrevDayClose(String(closeValue))
-      } else {
-        setPrevDayClose('')
-      }
-      if (rangeValue !== null) {
-        setPrevDayRange(String(rangeValue))
-      } else {
-        setPrevDayRange('')
-      }
-      
-      setSaveMsg('Saved. New values will apply on next data poll.')
-      
-      // Clear any session storage flags so popup can re-evaluate
-      // The key will be different now since data state changed
-      Object.keys(sessionStorage).forEach(key => {
-        if (key.startsWith('prevDayModalShown_')) {
-          sessionStorage.removeItem(key)
-        }
-      })
-      
-      setTimeout(() => setSaveMsg(''), 3000)
-    } catch (err) {
-      console.error('Failed to save previous-day inputs', err)
-      setSaveMsg('Error saving. Try again.')
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const getDirectionalColor = (state) => {
     switch (state) {
@@ -164,65 +74,6 @@ function DirectionAsymmetry() {
     <>
       <div className="card">
         <h2>Direction Model</h2>
-      </div>
-
-      {/* Previous Day Inputs (Optional) */}
-      <div className="card" style={{ marginTop: '20px' }}>
-        <h3>Previous Day Inputs</h3>
-        <p style={{ color: '#666', fontSize: '14px', marginBottom: '10px' }}></p>
-        <form onSubmit={handleSavePrevDayInputs} style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <label htmlFor="prev_day_close" style={{ fontWeight: 500, marginBottom: '4px' }}>Previous Day Close</label>
-            <input
-              id="prev_day_close"
-              name="prev_day_close"
-              type="number"
-              step="0.05"
-              min="0"
-              value={prevDayClose}
-              onChange={(e) => setPrevDayClose(e.target.value)}
-              style={{ padding: '8px', minWidth: '160px' }}
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <label htmlFor="prev_day_range" style={{ fontWeight: 500, marginBottom: '4px' }}>Previous Day Range (High - Low)</label>
-            <input
-              id="prev_day_range"
-              name="prev_day_range"
-              type="number"
-              step="0.05"
-              min="0"
-              value={prevDayRange}
-              onChange={(e) => setPrevDayRange(e.target.value)}
-              style={{ padding: '8px', minWidth: '160px' }}
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-            <span style={{ fontSize: '12px', color: '#666' }}>
-              {lastSavedDate ? `Last saved for: ${lastSavedDate}` : 'No saved date'}
-            </span>
-          </div>
-          <button
-            type="submit"
-            disabled={saving}
-            style={{
-              padding: '10px 16px',
-              backgroundColor: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              alignSelf: 'flex-end'
-            }}
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-        </form>
-        {saveMsg && (
-          <p style={{ marginTop: '10px', color: saveMsg.startsWith('Error') ? '#dc3545' : '#28a745' }}>
-            {saveMsg}
-          </p>
-        )}
       </div>
 
       {hasData ? (
