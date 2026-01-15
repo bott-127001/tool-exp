@@ -217,43 +217,48 @@ function Dashboard() {
         <p style={{ color: '#666', fontSize: '14px' }}></p>
       </div>
 
-      {/* Previous Day Data control (always visible button, conditional warning) */}
-      <div className="card" style={{ 
-        marginTop: '20px',
-        backgroundColor: '#e9f7ef',
-        border: '1px solid #28a745'
-      }}>
-        <h3>Previous Day Data</h3>
-        <p style={{ fontSize: '14px', color: '#155724', marginBottom: '8px' }}>
-          Previous day OHLC is used for Opening Location & Gap Acceptance calculations.
-          It is usually fetched automatically after the first successful data poll.
-        </p>
-        {prevDayMissing && (
+      {/* Previous Day Data control - only visible when data is missing */}
+      {prevDayMissing && (
+        <div
+          className="card"
+          style={{
+            marginTop: '20px',
+            backgroundColor: '#e9f7ef',
+            border: '1px solid #28a745',
+          }}
+        >
+          <h3>Previous Day Data</h3>
+          <p style={{ fontSize: '14px', color: '#155724', marginBottom: '8px' }}>
+            Previous day OHLC is used for Opening Location & Gap Acceptance calculations.
+            It is usually fetched automatically after the first successful data poll.
+          </p>
           <p style={{ fontSize: '13px', color: '#721c24', marginBottom: '8px' }}>
             We have not detected previous day data yet. Please fetch it manually using the button below.
           </p>
-        )}
-        {prevDayMessage && (
-          <div style={{
-            padding: '8px',
-            marginBottom: '10px',
-            borderRadius: '4px',
-            backgroundColor: prevDayMessage.includes('Error') ? '#f8d7da' : '#d4edda',
-            color: prevDayMessage.includes('Error') ? '#721c24' : '#155724',
-            fontSize: '13px'
-          }}>
-            {prevDayMessage}
-          </div>
-        )}
-        <button
-          onClick={handleFetchPreviousDayData}
-          disabled={fetchingPrevDay}
-          className="btn"
-          style={{ backgroundColor: '#007bff', color: 'white', border: 'none' }}
-        >
-          {fetchingPrevDay ? 'Fetching...' : 'Fetch Previous Day Data from Upstox'}
-        </button>
-      </div>
+          {prevDayMessage && (
+            <div
+              style={{
+                padding: '8px',
+                marginBottom: '10px',
+                borderRadius: '4px',
+                backgroundColor: prevDayMessage.includes('Error') ? '#f8d7da' : '#d4edda',
+                color: prevDayMessage.includes('Error') ? '#721c24' : '#155724',
+                fontSize: '13px',
+              }}
+            >
+              {prevDayMessage}
+            </div>
+          )}
+          <button
+            onClick={handleFetchPreviousDayData}
+            disabled={fetchingPrevDay}
+            className="btn"
+            style={{ backgroundColor: '#007bff', color: 'white', border: 'none' }}
+          >
+            {fetchingPrevDay ? 'Fetching...' : 'Fetch Previous Day Data from Upstox'}
+          </button>
+        </div>
+      )}
 
       {/* Upstox Login Status Card */}
       {upstoxLoginStatus && (!upstoxLoginStatus.logged_in_today || upstoxLoginStatus.login_failed_today) && (
