@@ -137,6 +137,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     data = json.loads(message)
                     if data.get("type") == "ping":
+                        manager.update_ping(websocket)  # Update ping timestamp
                         await websocket.send_json({"type": "pong"})
                 except:
                     pass

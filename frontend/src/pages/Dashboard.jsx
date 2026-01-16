@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useData } from './DataContext'
 import { useAuth } from './AuthContext'
 import axios from 'axios'
@@ -78,38 +78,34 @@ function Dashboard() {
     }
   }
 
+  // Consolidated interval refs tracking
+  const intervalRefsRef = useRef([])
+
   // Check Upstox login status on mount and when user changes
-  useEffect(() => {
-    const checkUpstoxLoginStatus = async () => {
-      if (!currentUser) return
-      
-      try {
-        const sessionToken = localStorage.getItem('session_token')
-        if (!sessionToken) return
-        
-        const response = await axios.get('/api/auth/check-upstox-login-status', {
-          headers: {
-            'Authorization': `Bearer ${sessionToken}`
-          }
-        })
-        
-        setUpstoxLoginStatus(response.data)
-      } catch (error) {
-        console.error('Error checking Upstox login status:', error)
-        setUpstoxLoginStatus({
-          logged_in_today: false,
-          has_token: false,
-          token_valid: false,
-          message: 'Error checking status'
-        })
-      }
-    }
+  const checkUpstoxLoginStatus = async () => {
+    if (!currentUser) return
     
-    checkUpstoxLoginStatus()
-    // Check every 5 minutes
-    const interval = setInterval(checkUpstoxLoginStatus, 5 * 60 * 1000)
-    return () => clearInterval(interval)
-  }, [currentUser])
+    try {
+      const sessionToken = localStorage.getItem('session_token')
+      if (!sessionToken) return
+      
+      const response = await axios.get('/api/auth/check-upstox-login-status', {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        }
+      })
+      
+      setUpstoxLoginStatus(response.data)
+    } catch (error) {
+      console.error('Error checking Upstox login status:', error)
+      setUpstoxLoginStatus({
+        logged_in_today: false,
+        has_token: false,
+        token_valid: false,
+        message: 'Error checking status'
+      })
+    }
+  }
 
   const handleTriggerUpstoxLogin = async () => {
     setTriggeringLogin(true)
@@ -155,37 +151,54 @@ function Dashboard() {
     }
   }
 
-  // After first successful data fetch, verify whether previous-day data exists.
-  // If auto-fetch (from backend) hasn't populated it, prompt user to fetch manually.
-  useEffect(() => {
-    const checkPreviousDayData = async () => {
-      if (!currentUser || !hasData || prevDayChecking) return
-      setPrevDayChecking(true)
-      try {
-        const response = await axios.get(`/api/settings/${currentUser}`)
-        const s = response.data || {}
-        const hasPrevDay =
-          s.prev_day_close !== undefined &&
-          s.prev_day_close !== null &&
-          s.prev_day_range !== undefined &&
-          s.prev_day_range !== null &&
-          s.prev_day_range > 0  // Also check that range is valid
-        setPrevDayMissing(!hasPrevDay)
-      } catch (error) {
-        console.error('Error checking previous day data:', error)
-        // If we can't confirm, err on the side of prompting the user.
-        setPrevDayMissing(true)
-      } finally {
-        setPrevDayChecking(false)
-      }
+  // Check previous day data
+  const checkPreviousDayData = async () => {
+    if (!currentUser || !hasData || prevDayChecking) return
+    setPrevDayChecking(true)
+    try {
+      const response = await axios.get(`/api/settings/${currentUser}`)
+      const s = response.data || {}
+      const hasPrevDay =
+        s.prev_day_close !== undefined &&
+        s.prev_day_close !== null &&
+        s.prev_day_range !== undefined &&
+        s.prev_day_range !== null &&
+        s.prev_day_range > 0  // Also check that range is valid
+      setPrevDayMissing(!hasPrevDay)
+    } catch (error) {
+      console.error('Error checking previous day data:', error)
+      // If we can't confirm, err on the side of prompting the user.
+      setPrevDayMissing(true)
+    } finally {
+      setPrevDayChecking(false)
     }
+  }
 
+  // Consolidated master interval for all periodic checks
+  useEffect(() => {
+    // Clear all previous intervals
+    intervalRefsRef.current.forEach(clearInterval)
+    intervalRefsRef.current = []
+    
+    if (!currentUser) return
+    
+    // Initial checks
+    checkUpstoxLoginStatus()
     checkPreviousDayData()
     
-    // Re-check periodically (every 30 seconds) in case auto-fetch completes
-    const interval = setInterval(checkPreviousDayData, 30000)
-    return () => clearInterval(interval)
-  }, [currentUser, hasData, prevDayChecking])
+    // Single consolidated interval for all checks (every 30 seconds)
+    const masterInterval = setInterval(() => {
+      checkUpstoxLoginStatus()
+      checkPreviousDayData()
+    }, 30000)
+    
+    intervalRefsRef.current.push(masterInterval)
+    
+    return () => {
+      intervalRefsRef.current.forEach(clearInterval)
+      intervalRefsRef.current = []
+    }
+  }, [currentUser, hasData])
 
   const handleFetchPreviousDayData = async () => {
     if (!currentUser) {

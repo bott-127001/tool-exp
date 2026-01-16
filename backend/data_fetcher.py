@@ -41,6 +41,10 @@ raw_option_chain: Optional[Dict] = None
 baseline_greeks: Optional[Dict] = None # NEW: To store baseline greeks for the day
 polling_active = False
 should_poll = False  # Flag to control whether polling should actually fetch data
+_polling_task: Optional[asyncio.Task] = None  # Track active polling task to prevent duplicates
+_data_sequence = 0  # Sequence counter for data ordering
+_last_successful_poll: Optional[datetime] = None  # Track last successful poll for stall detection
+_stall_warning_sent = False  # Flag to prevent spam from stall warnings
 # Price history for volatility calculations
 price_history: List[Dict] = []  # List of {timestamp, price} for 15-minute lookback
 full_day_price_history: List[Dict] = []  # List of {timestamp, price} for full day (for REA/DE)
@@ -575,6 +579,7 @@ async def polling_worker():
     """Background worker that polls Upstox API every 5 seconds"""
     global latest_data, raw_option_chain, polling_active, should_poll, baseline_greeks
     global price_history, full_day_price_history, open_price, market_open_time
+    global _data_sequence, _last_successful_poll, _stall_warning_sent
     
     polling_active = True
     current_user = None
@@ -586,6 +591,7 @@ async def polling_worker():
     
     # Main polling loop - wait for explicit enable via login
     while polling_active:
+        poll_start_time = datetime.now(timezone.utc)
         # Time Check: 09:15 to 15:30 IST
         now_utc = datetime.now(timezone.utc)
         now_ist = now_utc + timedelta(hours=5, minutes=30)
@@ -699,8 +705,20 @@ async def polling_worker():
                 if db_baseline:
                     baseline_greeks = db_baseline
 
-            # Fetch option chain
-            upstox_data = await fetch_option_chain(current_user)
+            # Fetch option chain with timeout protection
+            try:
+                upstox_data = await asyncio.wait_for(
+                    fetch_option_chain(current_user),
+                    timeout=15.0  # 15 second max per API call
+                )
+            except asyncio.TimeoutError:
+                print(f"⚠️  API call timeout for {current_user}")
+                # Adaptive sleep: maintain 5-second interval
+                poll_duration = (datetime.now(timezone.utc) - poll_start_time).total_seconds()
+                sleep_time = max(0, 5.0 - poll_duration)
+                if sleep_time > 0:
+                    await asyncio.sleep(sleep_time)
+                continue
             
             if upstox_data:
                 # Store raw data
@@ -848,8 +866,15 @@ async def polling_worker():
                                 # Reset counter after logging
                                 signal_confirmation_state[current_user][position] = 0
                     
-                    # Combine all data
+                    # Increment sequence number and update successful poll timestamp
+                    _data_sequence += 1
+                    _last_successful_poll = datetime.now(timezone.utc)
+                    _stall_warning_sent = False
+                    
+                    # Combine all data with sequence and poll timestamp
                     latest_data = {
+                        "_sequence": _data_sequence,
+                        "_poll_timestamp": _last_successful_poll.isoformat(),
                         "timestamp": normalized_data["timestamp"],
                         "underlying_price": normalized_data["underlying_price"],
                         "atm_strike": normalized_data["atm_strike"],
@@ -867,12 +892,17 @@ async def polling_worker():
                     # Broadcast to WebSocket clients
                     if manager:
                         await manager.broadcast(latest_data)
+                        # Periodic cleanup of stale connections (every 10th poll)
+                        if _data_sequence % 10 == 0:
+                            await manager.cleanup_stale_connections(max_age_seconds=300)
                         # Import here to avoid circular dependency
                         from database import log_market_data
                         # Log the data to the database for ML training
                         await log_market_data(latest_data)
                 except Exception as e:
                     print(f"⚠️  Error processing data: {e}")
+                    import traceback
+                    traceback.print_exc()
         
         except asyncio.CancelledError:
             break
@@ -881,8 +911,18 @@ async def polling_worker():
             import traceback
             traceback.print_exc()
         finally:
-            # Wait 5 seconds before next poll, even if an error occurred
-            await asyncio.sleep(5)
+            # Stall detection: check if we haven't had a successful poll in 30 seconds
+            if _last_successful_poll:
+                time_since_success = (datetime.now(timezone.utc) - _last_successful_poll).total_seconds()
+                if time_since_success > 30 and not _stall_warning_sent:
+                    print(f"⚠️  STALL DETECTED: No successful poll in {time_since_success:.1f} seconds")
+                    _stall_warning_sent = True
+            
+            # Adaptive sleep: maintain 5-second interval
+            poll_duration = (datetime.now(timezone.utc) - poll_start_time).total_seconds()
+            sleep_time = max(0, 5.0 - poll_duration)
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
     
     polling_active = False
     should_poll = False
@@ -890,15 +930,26 @@ async def polling_worker():
 
 
 async def start_polling():
-    """Start the polling worker"""
-    await polling_worker() # Start the worker
+    """Start the polling worker with singleton guard"""
+    global _polling_task
+    if _polling_task is not None and not _polling_task.done():
+        print("⚠️  Polling worker already running, skipping duplicate start")
+        return
+    _polling_task = asyncio.create_task(polling_worker())
 
 
 async def stop_polling():
-    """Stop the polling worker"""
-    global polling_active, should_poll, latest_data, baseline_greeks
+    """Stop the polling worker with proper task cancellation"""
+    global _polling_task, polling_active, should_poll, latest_data, baseline_greeks
     polling_active = False
     should_poll = False
+    if _polling_task is not None and not _polling_task.done():
+        _polling_task.cancel()
+        try:
+            await _polling_task
+        except asyncio.CancelledError:
+            pass
+    _polling_task = None
     print("🛑 Polling stopped")
 
 
