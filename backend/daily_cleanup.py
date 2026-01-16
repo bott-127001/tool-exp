@@ -113,11 +113,12 @@ async def daily_cleanup_task():
         print(f"{'='*70}\n")
 
 
-async def daily_cleanup_scheduler():
+async def token_cleanup_scheduler():
     """
-    Background task that runs daily cleanup at 3 AM IST.
+    Background task that runs token cleanup at 3 AM IST daily.
+    Only clears access tokens (separate from full daily cleanup which is now manual).
     """
-    print("🕐 Daily cleanup scheduler started (runs at 3:00 AM IST)")
+    print("🕐 Token cleanup scheduler started (runs at 3:00 AM IST)")
     
     while True:
         try:
@@ -140,17 +141,22 @@ async def daily_cleanup_scheduler():
             next_cleanup_utc = (next_cleanup - timedelta(hours=5, minutes=30)).replace(tzinfo=timezone.utc)
             wait_seconds = (next_cleanup_utc - now_utc).total_seconds()
             
-            print(f"⏰ Next cleanup scheduled for: {next_cleanup.strftime('%Y-%m-%d %H:%M:%S IST')}")
+            print(f"⏰ Next token cleanup scheduled for: {next_cleanup.strftime('%Y-%m-%d %H:%M:%S IST')}")
             print(f"   (Waiting {wait_seconds/3600:.1f} hours)")
             
             # Wait until cleanup time
             await asyncio.sleep(wait_seconds)
             
-            # Run cleanup task
-            await daily_cleanup_task()
+            # Run token cleanup only
+            print(f"\n{'='*70}")
+            print(f"🔐 Starting token cleanup at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            print(f"{'='*70}")
+            await null_out_tokens()
+            print(f"✅ Token cleanup completed")
+            print(f"{'='*70}\n")
             
         except Exception as e:
-            print(f"❌ Error in cleanup scheduler: {str(e)}")
+            print(f"❌ Error in token cleanup scheduler: {str(e)}")
             import traceback
             traceback.print_exc()
             # Wait 1 hour before retrying on error

@@ -64,6 +64,7 @@ def calculate_gap_and_acceptance(
         gap_pct = abs(gap) / previous_day_range
         result["gap"] = gap
         result["gap_pct"] = gap_pct
+        print(f"✅ Gap calculation: open={open_price}, prev_close={previous_close}, gap={gap:.2f}, gap_pct={gap_pct:.4f}")
     else:
         gap = 0.0  # Treat as non-gap day for now
         result["needs_prev_day_input"] = True
@@ -73,6 +74,7 @@ def calculate_gap_and_acceptance(
         if previous_day_range is None or previous_day_range <= 0:
             missing.append("previous_day_range")
         result["missing_prev_fields"] = missing
+        print(f"⚠️  Gap calculation skipped: previous_close={previous_close}, previous_day_range={previous_day_range}")
 
     # Acceptance: % of 5-min closes in gap direction after first 30 min
     # NEW IMPLEMENTATION:
@@ -437,7 +439,9 @@ def calculate_direction_metrics(
     previous_day_range = settings.get("prev_day_range")
     previous_day_date_str = settings.get("prev_day_date")
 
-    # Determine if previous-day inputs are stale (not from yesterday)
+    # Determine if previous-day inputs are stale
+    # Data is considered valid if it's from the last trading day (handles holidays)
+    # We allow data from up to 5 days ago (to account for weekends + holidays)
     stale_prev_day_data = False
     if current_time:
         today_date = current_time.date()
@@ -450,16 +454,30 @@ def calculate_direction_metrics(
         try:
             from datetime import date
             prev_day_date = date.fromisoformat(previous_day_date_str)
-            expected_prev_date = today_date - timedelta(days=1)
-            if prev_day_date != expected_prev_date:
+            
+            # Calculate days difference
+            days_diff = (today_date - prev_day_date).days
+            
+            # Data is valid if:
+            # 1. It's from 1-5 days ago (handles holidays and weekends)
+            # 2. The date is not a weekend (Saturday=5, Sunday=6)
+            # 3. It's not in the future
+            if days_diff < 1 or days_diff > 5:
+                stale_prev_day_data = True
+            elif prev_day_date.weekday() >= 5:  # Weekend
+                stale_prev_day_data = True
+            elif prev_day_date >= today_date:  # Future date
                 stale_prev_day_data = True
         except Exception:
             stale_prev_day_data = True
 
     # If stale, ignore previous-day values for calculations
     if stale_prev_day_data:
+        print(f"⚠️  Previous day data marked as stale: date={previous_day_date_str}, today={today_date}")
         previous_close = None
         previous_day_range = None
+    elif previous_close is not None and previous_day_range is not None:
+        print(f"✅ Using previous day data: date={previous_day_date_str}, close={previous_close}, range={previous_day_range}")
 
     # Ensure history is sorted by time
     history_sorted = sorted(price_history, key=lambda p: p["timestamp"])

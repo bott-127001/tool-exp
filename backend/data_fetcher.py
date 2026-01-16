@@ -764,6 +764,29 @@ async def polling_worker():
                     # Load user settings (for thresholds)
                     settings = await get_user_settings(current_user)
                     settings = settings or {}
+                    
+                    # Before calculating direction metrics, ensure we have previous-day data
+                    # Auto-fetch previous-day stats if not already fetched today
+                    try:
+                        now_utc = datetime.now(timezone.utc)
+                        now_ist = now_utc + timedelta(hours=5, minutes=30)
+                        today_str = now_ist.strftime("%Y-%m-%d")
+                        last_fetched_date = _prev_day_stats_fetched_for.get(current_user)
+
+                        if last_fetched_date != today_str:
+                            ohlc = await fetch_and_store_previous_day_data(current_user)
+                            if ohlc:
+                                _prev_day_stats_fetched_for[current_user] = today_str
+                                # Reload settings to get the newly stored previous-day data
+                                settings = await get_user_settings(current_user)
+                                settings = settings or {}
+                            else:
+                                print(
+                                    f"⚠️  Auto-fetch of previous-day data failed for {current_user}. "
+                                    f"Manual fetch can be triggered from Dashboard."
+                                )
+                    except Exception as e:
+                        print(f"⚠️  Error in auto-fetching previous-day data for {current_user}: {e}")
 
                     volatility_metrics = calculate_volatility_metrics(
                         current_price=current_price,
@@ -840,25 +863,6 @@ async def polling_worker():
                         "volatility_metrics": volatility_metrics,  # Volatility-permission model data
                         "direction_metrics": direction_metrics,    # Direction & Asymmetry model data
                     }
-
-                    # After first successful poll of the day for this user, auto-fetch previous-day stats
-                    try:
-                        now_utc = datetime.now(timezone.utc)
-                        now_ist = now_utc + timedelta(hours=5, minutes=30)
-                        today_str = now_ist.strftime("%Y-%m-%d")
-                        last_fetched_date = _prev_day_stats_fetched_for.get(current_user)
-
-                        if last_fetched_date != today_str:
-                            ohlc = await fetch_and_store_previous_day_data(current_user)
-                            if ohlc:
-                                _prev_day_stats_fetched_for[current_user] = today_str
-                            else:
-                                print(
-                                    f"⚠️  Auto-fetch of previous-day data failed for {current_user}. "
-                                    f"Manual fetch can be triggered from Settings."
-                                )
-                    except Exception as e:
-                        print(f"⚠️  Error in auto-fetching previous-day data for {current_user}: {e}")
                     
                     # Broadcast to WebSocket clients
                     if manager:

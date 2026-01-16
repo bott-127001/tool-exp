@@ -71,28 +71,29 @@ async def lifespan(app: FastAPI):
         from auto_auth import daily_token_refresh_scheduler
         token_refresh_task = asyncio.create_task(daily_token_refresh_scheduler())
         
-        # Start daily cleanup scheduler (runs daily at 3:00 AM IST)
-        from daily_cleanup import daily_cleanup_scheduler
-        cleanup_task = asyncio.create_task(daily_cleanup_scheduler())
+        # Start automated token cleanup scheduler (runs daily at 3:00 AM IST)
+        # Note: Full daily cleanup is now manual-only via Settings page
+        from daily_cleanup import token_cleanup_scheduler
+        token_cleanup_task = asyncio.create_task(token_cleanup_scheduler())
     else:
         # This is a duplicate worker, just initialize DB
         print("Database initialized (worker process)")
         polling_task = None
         token_refresh_task = None
-        cleanup_task = None
+        token_cleanup_task = None
     
     yield
     
     # Shutdown
-    if polling_task is not None and token_refresh_task is not None and cleanup_task is not None:
+    if polling_task is not None and token_refresh_task is not None and token_cleanup_task is not None:
         await stop_polling()
         polling_task.cancel()
         token_refresh_task.cancel()
-        cleanup_task.cancel()
+        token_cleanup_task.cancel()
         try:
             await polling_task
             await token_refresh_task
-            await cleanup_task
+            await token_cleanup_task
         except asyncio.CancelledError:
             pass
 
@@ -291,13 +292,13 @@ async def export_data():
 @app.delete("/api/clear-data")
 async def clear_market_data():
     """
-    Manual trigger for daily cleanup tasks (same as automated daily_cleanup).
+    Manual trigger for daily cleanup tasks.
     Performs:
     1. Clear daily_baselines from database
     2. Clear market_data_log collection
     3. Reset in-memory state (baseline_greeks, price_history, latest_data)
     
-    NOTE: Does NOT null out tokens (too destructive for manual trigger).
+    NOTE: Does NOT null out tokens (use /api/clear-tokens endpoint for that).
     """
     user = await get_current_authenticated_user()
     if not user:
@@ -327,6 +328,31 @@ async def clear_market_data():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during cleanup: {str(e)}")
+
+
+@app.delete("/api/clear-tokens")
+async def clear_tokens():
+    """
+    Manual trigger to clear access tokens for all users.
+    This nulls out access_token, refresh_token, and token_expires_at.
+    
+    NOTE: Tokens are also automatically cleared at 3 AM IST daily.
+    This endpoint provides a manual trigger option.
+    """
+    user = await get_current_authenticated_user()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    from daily_cleanup import null_out_tokens
+    
+    try:
+        users_modified = await null_out_tokens()
+        return {
+            "message": f"Access tokens cleared for {users_modified} users",
+            "users_modified": users_modified
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error clearing tokens: {str(e)}")
 
 
 @app.post("/api/fetch-previous-day-data")

@@ -120,6 +120,31 @@ function Settings() {
     }
   };
 
+  const handleClearTokens = async () => {
+    if (!window.confirm(
+      'This will clear access tokens for ALL users:\n' +
+      '• Access tokens will be nulled out\n' +
+      '• Refresh tokens will be nulled out\n' +
+      '• Users will need to re-login\n\n' +
+      'NOTE: Tokens are also automatically cleared at 3 AM IST daily.\n\n' +
+      'Continue?'
+    )) {
+      return;
+    }
+
+    try {
+      setMessage('Clearing access tokens...');
+      const response = await axios.delete('/api/clear-tokens');
+      const message = response.data.message || 'Tokens cleared';
+      const usersModified = response.data.users_modified || 0;
+      setMessage(`${message} (${usersModified} users affected)`);
+      setTimeout(() => setMessage(''), 5000);
+    } catch (error) {
+      console.error('Error clearing tokens:', error);
+      setMessage(`Error: ${error.response?.data?.detail || 'Failed to clear tokens'}`);
+    }
+  };
+
   
         
        
@@ -347,8 +372,10 @@ function Settings() {
           Download the collected market data (Greeks, Signals, Prices) for Machine Learning analysis.
         </p>
         <p style={{ marginBottom: '15px', fontSize: '14px', color: '#856404', backgroundColor: '#fff3cd', padding: '10px', borderRadius: '4px' }}>
-          <strong>Daily Cleanup:</strong> The "Run Daily Cleanup" button performs the same tasks as the automated daily cleanup (runs at 3 AM IST). 
-          It clears daily baselines, market data logs, and resets in-memory state.
+          <strong>Daily Cleanup:</strong> The "Run Daily Cleanup" button clears daily baselines, market data logs, and resets in-memory state.
+          <br />
+          <strong>Clear Tokens:</strong> The "Clear Access Tokens" button nulls out all user tokens (users will need to re-login). 
+          Tokens are also automatically cleared at 3 AM IST daily.
         </p>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <button 
@@ -365,6 +392,14 @@ function Settings() {
             style={{ backgroundColor: '#dc3545', color: 'white', border: 'none' }}
           >
             Run Daily Cleanup
+          </button>
+
+          <button 
+            onClick={handleClearTokens}
+            className="btn"
+            style={{ backgroundColor: '#ff6b35', color: 'white', border: 'none' }}
+          >
+            Clear Access Tokens
           </button>
         </div>
         
