@@ -159,7 +159,7 @@ function Dashboard() {
   // If auto-fetch (from backend) hasn't populated it, prompt user to fetch manually.
   useEffect(() => {
     const checkPreviousDayData = async () => {
-      if (!currentUser || !hasData || prevDayChecking || prevDayMissing) return
+      if (!currentUser || !hasData || prevDayChecking) return
       setPrevDayChecking(true)
       try {
         const response = await axios.get(`/api/settings/${currentUser}`)
@@ -168,7 +168,8 @@ function Dashboard() {
           s.prev_day_close !== undefined &&
           s.prev_day_close !== null &&
           s.prev_day_range !== undefined &&
-          s.prev_day_range !== null
+          s.prev_day_range !== null &&
+          s.prev_day_range > 0  // Also check that range is valid
         setPrevDayMissing(!hasPrevDay)
       } catch (error) {
         console.error('Error checking previous day data:', error)
@@ -180,7 +181,11 @@ function Dashboard() {
     }
 
     checkPreviousDayData()
-  }, [currentUser, hasData, prevDayChecking, prevDayMissing])
+    
+    // Re-check periodically (every 30 seconds) in case auto-fetch completes
+    const interval = setInterval(checkPreviousDayData, 30000)
+    return () => clearInterval(interval)
+  }, [currentUser, hasData, prevDayChecking])
 
   const handleFetchPreviousDayData = async () => {
     if (!currentUser) {
@@ -200,11 +205,27 @@ function Dashboard() {
       })
 
       const data = response.data
-      setPrevDayMessage(`Previous day data fetched for ${data.prev_day_date}`)
-      setPrevDayMissing(false)
+      setPrevDayMessage(`✅ Success! Previous day data fetched for ${data.prev_day_date}`)
+      
+      // Re-check to update prevDayMissing state
+      setTimeout(async () => {
+        try {
+          const settingsResponse = await axios.get(`/api/settings/${currentUser}`)
+          const s = settingsResponse.data || {}
+          const hasPrevDay =
+            s.prev_day_close !== undefined &&
+            s.prev_day_close !== null &&
+            s.prev_day_range !== undefined &&
+            s.prev_day_range !== null &&
+            s.prev_day_range > 0
+          setPrevDayMissing(!hasPrevDay)
+        } catch (error) {
+          console.error('Error re-checking previous day data:', error)
+        }
+      }, 500)
     } catch (error) {
       console.error('Error fetching previous day data:', error)
-      setPrevDayMessage(error.response?.data?.detail || 'Error fetching previous day data.')
+      setPrevDayMessage(`❌ ${error.response?.data?.detail || 'Error fetching previous day data. The market may have been closed on that day.'}`)
     } finally {
       setFetchingPrevDay(false)
     }
@@ -227,13 +248,14 @@ function Dashboard() {
             border: '1px solid #28a745',
           }}
         >
-          <h3>Previous Day Data</h3>
+          <h3>Previous Day Data Required</h3>
           <p style={{ fontSize: '14px', color: '#155724', marginBottom: '8px' }}>
-            Previous day OHLC is used for Opening Location & Gap Acceptance calculations.
+            Previous day OHLC is used for <strong>Opening Location & Gap Acceptance</strong> calculations.
             It is usually fetched automatically after the first successful data poll.
           </p>
           <p style={{ fontSize: '13px', color: '#721c24', marginBottom: '8px' }}>
-            We have not detected previous day data yet. Please fetch it manually using the button below.
+            ⚠️ Previous day data is missing. The system will try multiple days back to handle holidays.
+            Please fetch it manually using the button below.
           </p>
           {prevDayMessage && (
             <div

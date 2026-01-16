@@ -521,35 +521,50 @@ def get_price_15min_ago(current_time: datetime) -> Optional[float]:
 async def fetch_and_store_previous_day_data(username: str) -> Optional[Dict]:
     """
     Fetch previous day's OHLC for NIFTY 50 and store in user settings.
+    Handles holidays by trying multiple days back if the first attempt fails.
     Returns the stored payload on success, or None on failure.
     """
     # Determine last trading day in IST
     now_utc = datetime.now(timezone.utc)
     now_ist = now_utc + timedelta(hours=5, minutes=30)
-    last_trading_day = get_last_trading_day(now_ist)
-
+    
     instrument_key = "NSE_INDEX|Nifty 50"
-    ohlc = await fetch_previous_day_ohlc(username, instrument_key, last_trading_day)
-    if not ohlc:
-        print(f"❌ Failed to fetch previous-day OHLC for {username} on {last_trading_day}")
-        return None
+    
+    # Try up to 5 days back to handle holidays (weekends + holidays)
+    # Start with the calculated last trading day, then go back further if needed
+    start_date = datetime.strptime(get_last_trading_day(now_ist), "%Y-%m-%d")
+    max_days_back = 5
+    
+    for days_back in range(max_days_back):
+        target_date = (start_date - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        
+        # Skip weekends in our search (though get_last_trading_day already handles the first one)
+        target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+        if target_dt.weekday() >= 5:  # Skip Saturday (5) and Sunday (6)
+            continue
+        
+        ohlc = await fetch_previous_day_ohlc(username, instrument_key, target_date)
+        if ohlc:
+            # Success! Store the data
+            settings_update = {
+                "prev_day_close": ohlc["close"],
+                "prev_day_range": ohlc["range"],
+                "prev_day_date": ohlc["date"],
+            }
+            updated = await update_user_settings(username, settings_update)
+            if not updated:
+                print(f"❌ Failed to update settings with previous-day data for {username}")
+                return None
 
-    # Update user settings with prev_day_* fields
-    settings_update = {
-        "prev_day_close": ohlc["close"],
-        "prev_day_range": ohlc["range"],
-        "prev_day_date": ohlc["date"],
-    }
-    updated = await update_user_settings(username, settings_update)
-    if not updated:
-        print(f"❌ Failed to update settings with previous-day data for {username}")
-        return None
-
-    print(
-        f"✅ Previous-day data stored for {username} - "
-        f"date={ohlc['date']}, high={ohlc['high']}, low={ohlc['low']}, close={ohlc['close']}, range={ohlc['range']}"
-    )
-    return ohlc
+            print(
+                f"✅ Previous-day data stored for {username} - "
+                f"date={ohlc['date']}, high={ohlc['high']}, low={ohlc['low']}, close={ohlc['close']}, range={ohlc['range']}"
+            )
+            return ohlc
+    
+    # If we get here, we tried multiple days and all failed
+    print(f"❌ Failed to fetch previous-day OHLC for {username} after trying {max_days_back} days back (may be a market holiday)")
+    return None
 
 
 # Track which date we've already fetched previous-day stats for (per user)
