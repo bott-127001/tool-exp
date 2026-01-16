@@ -96,18 +96,27 @@ function Settings() {
   };
 
   const handleClearData = async () => {
-    if (!window.confirm('Are you sure you want to delete ALL collected market data? This cannot be undone.')) {
+    if (!window.confirm(
+      'This will perform daily cleanup tasks:\n' +
+      '• Clear daily baselines\n' +
+      '• Clear all market data logs\n' +
+      '• Reset in-memory state\n\n' +
+      'This cannot be undone. Continue?'
+    )) {
       return;
     }
 
     try {
-      setMessage('Clearing data...');
+      setMessage('Running daily cleanup tasks...');
       const response = await axios.delete('/api/clear-data');
-      setMessage(response.data.message);
-      setTimeout(() => setMessage(''), 3000);
+      const results = response.data.results || {};
+      const message = response.data.message || 'Cleanup completed';
+      const details = `Baselines: ${results.baselines_cleared || 0}, Market Data: ${results.market_data_cleared || 0} records`;
+      setMessage(`${message}. ${details}`);
+      setTimeout(() => setMessage(''), 5000);
     } catch (error) {
-      console.error('Error clearing data:', error);
-      setMessage('Error clearing data.');
+      console.error('Error running cleanup:', error);
+      setMessage(`Error: ${error.response?.data?.detail || 'Failed to run cleanup tasks'}`);
     }
   };
 
@@ -333,9 +342,13 @@ function Settings() {
 
         <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
         
-        <h3>Data Export</h3>
+        <h3>Data Export & Cleanup</h3>
         <p style={{ marginBottom: '15px', color: '#666' }}>
           Download the collected market data (Greeks, Signals, Prices) for Machine Learning analysis.
+        </p>
+        <p style={{ marginBottom: '15px', fontSize: '14px', color: '#856404', backgroundColor: '#fff3cd', padding: '10px', borderRadius: '4px' }}>
+          <strong>Daily Cleanup:</strong> The "Run Daily Cleanup" button performs the same tasks as the automated daily cleanup (runs at 3 AM IST). 
+          It clears daily baselines, market data logs, and resets in-memory state.
         </p>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <button 
@@ -351,7 +364,7 @@ function Settings() {
             className="btn"
             style={{ backgroundColor: '#dc3545', color: 'white', border: 'none' }}
           >
-            Clear All Data
+            Run Daily Cleanup
           </button>
         </div>
         

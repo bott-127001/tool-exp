@@ -290,14 +290,43 @@ async def export_data():
 
 @app.delete("/api/clear-data")
 async def clear_market_data():
-    """Clears all collected market data logs from the database."""
+    """
+    Manual trigger for daily cleanup tasks (same as automated daily_cleanup).
+    Performs:
+    1. Clear daily_baselines from database
+    2. Clear market_data_log collection
+    3. Reset in-memory state (baseline_greeks, price_history, latest_data)
+    
+    NOTE: Does NOT null out tokens (too destructive for manual trigger).
+    """
     user = await get_current_authenticated_user()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    from database import market_data_log_collection
-    result = await market_data_log_collection.delete_many({})
-    return {"message": f"Successfully deleted {result.deleted_count} records."}
+    from database import market_data_log_collection, db
+    from daily_cleanup import clear_daily_baselines, reset_in_memory_state
+    
+    results = {}
+    
+    try:
+        # Step 1: Clear daily_baselines
+        baseline_count = await clear_daily_baselines()
+        results["baselines_cleared"] = baseline_count
+        
+        # Step 2: Clear market_data_log
+        market_data_result = await market_data_log_collection.delete_many({})
+        results["market_data_cleared"] = market_data_result.deleted_count
+        
+        # Step 3: Reset in-memory state
+        await reset_in_memory_state()
+        results["in_memory_reset"] = True
+        
+        return {
+            "message": "Daily cleanup tasks completed successfully",
+            "results": results
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error during cleanup: {str(e)}")
 
 
 @app.post("/api/fetch-previous-day-data")
