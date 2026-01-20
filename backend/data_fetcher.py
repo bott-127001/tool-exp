@@ -1107,8 +1107,12 @@ def enable_polling():
     """Enable polling - called after successful login"""
     global should_poll
     global latest_data
+    global _current_day_open_candle_fetched_for, _prev_day_stats_fetched_for
     latest_data = None
     reset_baseline_greeks() # Clear in-memory baseline to force a reload from DB on next poll
+    # Reset tracking dictionaries to force fresh fetches on next poll
+    _current_day_open_candle_fetched_for.clear()
+    _prev_day_stats_fetched_for.clear()
     should_poll = True
     print("✅ Polling enabled - will start fetching data with today's fresh tokens")
 
