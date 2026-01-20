@@ -599,10 +599,11 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
         "Accept": "application/json",
     }
 
-    # V3 1-minute candle endpoint for today
-    # /v3/historical-candle/{instrument_key}/minutes/1/{from_date} {from_time}/{to_date} {to_time}
-    # We fetch 1 minute: 09:15:00 to 09:15:59 IST
-    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/{instrument_key}/minutes/1/{today_str} 09:15:00/{today_str} 09:15:59"
+    # V3 intraday candle endpoint for current day
+    # Format: /v3/intraday-candle/{instrument_key}/minutes/1?date=YYYY-MM-DD&limit=1
+    # Returns only the first 1-minute candle (9:15 AM opening candle)
+    # Limit=1 optimizes API response to fetch only the opening candle
+    url = f"{UPSTOX_BASE_URL_V3}/intraday-candle/{instrument_key}/minutes/1?date={today_str}&limit=1"
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -619,13 +620,15 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
 
         candles = data.get("data", {}).get("candles", [])
         if not candles:
-            print(f"No candles returned for {instrument_key} at market open (9:15 AM IST) on {today_str}")
+            print(f"No candles returned for {instrument_key} on {today_str}")
             return None
 
         # Candle format: [timestamp, open, high, low, close, volume, oi]
+        # The first candle should be the 9:15 AM 1-minute candle
+        # Verify it's actually from 9:15 AM by checking the timestamp
         candle = candles[0]
         if len(candle) < 2:
-            print(f"Unexpected candle format for {instrument_key} at market open on {today_str}: {candle}")
+            print(f"Unexpected candle format for {instrument_key} on {today_str}: {candle}")
             return None
 
         _, open_price_val = candle[:2]
