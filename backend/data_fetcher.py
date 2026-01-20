@@ -992,27 +992,8 @@ async def polling_worker():
                             position = signal["position"]
                             # Check if we've reached required confirmations
                             if signal_confirmation_state.get(current_user, {}).get(position, 0) >= required_confirmations:
-                                # Log signal - use ATM strike for the detected position
-                                strike_price = normalized_data["atm_strike"]
-                                strike_ltp = 0
-                                option_type = "CE" if "Call" in position else "PE"
-                                
-                                # Find the LTP for ATM strike of the detected type
-                                for opt in normalized_data["options"]:
-                                    if opt["type"] == option_type and opt["strike"] == strike_price:
-                                        strike_ltp = opt.get("ltp", 0)
-                                        break
-                                await log_signal(
-                                    username=current_user,
-                                    position=position,
-                                    strike_price=strike_price,
-                                    strike_ltp=strike_ltp,
-                                    delta=signal["delta"]["value"],
-                                    vega=signal["vega"]["value"],
-                                    theta=signal["theta"]["value"],
-                                    gamma=signal["gamma"]["value"],
-                                    raw_chain=normalized_data
-                                )
+                                # DISABLED: Trade log storage temporarily disabled
+                                # TODO: Re-enable when ready to log trades
                                 # Reset counter after logging
                                 signal_confirmation_state[current_user][position] = 0
                     
