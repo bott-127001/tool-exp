@@ -48,8 +48,9 @@ _stall_warning_sent = False  # Flag to prevent spam from stall warnings
 # Price history for volatility calculations
 price_history: List[Dict] = []  # List of {timestamp, price} for 15-minute lookback
 full_day_price_history: List[Dict] = []  # List of {timestamp, price} for full day (for REA/DE)
-open_price: Optional[float] = None  # Day's open price
+open_price: Optional[float] = None  # Day's open price (from actual 1-min candle at 9:15 AM)
 market_open_time: Optional[datetime] = None  # Market open time for the day
+open_price_from_candle: Optional[float] = None  # Tracks the open price fetched from candle
 from ws_manager import manager # Import the shared manager instance
 # Upstox API endpoints
 UPSTOX_BASE_URL = "https://api.upstox.com/v2"
@@ -469,8 +470,11 @@ def update_price_history(current_price: float, current_time: datetime):
     - price_history: keeps only last 15 minutes of data (for RV calculations)
     - full_day_price_history: keeps all prices from market open (for REA/DE calculations)
     Also maintains open price for the day
+    
+    NOTE: If open_price_from_candle is set (from 9:15 AM 1-minute candle), it will be used
+    as the day's open price instead of the first spot price update.
     """
-    global price_history, full_day_price_history, open_price, market_open_time
+    global price_history, full_day_price_history, open_price, market_open_time, open_price_from_candle
     
     # Check if we need to reset for a new day
     today_market_open = get_market_open_time(current_time)
@@ -479,9 +483,14 @@ def update_price_history(current_price: float, current_time: datetime):
     if market_open_time is None or today_market_open.date() != market_open_time.date():
         price_history = []
         full_day_price_history = []
-        open_price = current_price
+        # Use accurate open price from candle if available, otherwise use current spot price
+        if open_price_from_candle is not None:
+            open_price = open_price_from_candle
+            print(f"📊 New trading day detected. Using accurate open price from 9:15 AM candle: {open_price}")
+        else:
+            open_price = current_price
+            print(f"📊 New trading day detected. Open price (from spot price): {open_price}")
         market_open_time = today_market_open
-        print(f"📊 New trading day detected. Open price: {open_price}")
     
     # Add current price to both histories
     price_entry = {
@@ -521,6 +530,115 @@ def get_price_15min_ago(current_time: datetime) -> Optional[float]:
         return closest_price
     
     return None
+
+async def fetch_current_day_open_candle(username: str, instrument_key: str) -> Optional[float]:
+    """
+    Fetch the current day's 1-minute candle at 9:15 AM (market open) to get the accurate open price.
+    
+    IMPORTANT: This should only be called AFTER 9:16 AM IST because:
+    - The 9:15-9:16 AM candle opens at 9:15 but doesn't close/complete until 9:16
+    - Upstox API won't return the complete candle data until after 9:16 AM
+    - Polling auto-enforces this by tracking the fetch per day
+    
+    Returns: The open price (float) from the 9:15 AM candle, or None on failure.
+    """
+    tokens = await get_user_tokens(username)
+    if not tokens:
+        print(f"No tokens found for user: {username} (fetch_current_day_open_candle)")
+        return None
+
+    # Check token validity
+    now_utc = datetime.now(timezone.utc)
+    now_ist = now_utc + timedelta(hours=5, minutes=30)
+    today_str = now_ist.strftime("%Y-%m-%d")
+    current_time_ist = now_ist.time()
+
+    # Safety check: Don't attempt to fetch until after 9:16 AM IST
+    # The 9:15 candle won't be complete until 9:16
+    earliest_fetch_time = datetime.strptime("09:16:05", "%H:%M:%S").time()
+    
+    if current_time_ist < earliest_fetch_time:
+        print(f"⏳ Too early to fetch 9:15 AM candle ({current_time_ist.strftime('%H:%M')}). Waiting until after 9:16 AM IST...")
+        return None
+
+    updated_at = tokens.get("updated_at")
+    if updated_at:
+        try:
+            if isinstance(updated_at, datetime):
+                if updated_at.tzinfo is not None:
+                    updated_utc = updated_at.astimezone(timezone.utc)
+                else:
+                    updated_utc = updated_at.replace(tzinfo=timezone.utc)
+                updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+            else:
+                updated_dt = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+                if updated_dt.tzinfo is None:
+                    updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                updated_utc = updated_dt.astimezone(timezone.utc)
+                updated_ist = updated_utc + timedelta(hours=5, minutes=30)
+
+            token_date_str = updated_ist.strftime("%Y-%m-%d")
+            if token_date_str != today_str:
+                print(f"⏳ Token for {username} is from {token_date_str}, not today. Cannot fetch current-day open candle.")
+                return None
+        except Exception as e:
+            print(f"⚠️  Error checking token date for current-day open candle: {e}")
+            return None
+
+    # Check token expiration
+    import time
+
+    access_token = tokens.get("access_token")
+    token_expires_at = tokens.get("token_expires_at", 0)
+    if not access_token or token_expires_at <= (time.time() + 60):
+        print(f"❌ Token not valid for {username} when fetching current-day open candle.")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+    }
+
+    # V3 1-minute candle endpoint for today
+    # /v3/historical-candle/{instrument_key}/minutes/1/{from_date} {from_time}/{to_date} {to_time}
+    # We fetch 1 minute: 09:15:00 to 09:15:59 IST
+    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/{instrument_key}/minutes/1/{today_str} 09:15:00/{today_str} 09:15:59"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, headers=headers)
+
+        if response.status_code != 200:
+            print(f"API Error (current day open candle): {response.status_code} - {response.text}")
+            return None
+
+        data = response.json()
+        if data.get("status") != "success":
+            print(f"Current day open candle API returned error status: {data}")
+            return None
+
+        candles = data.get("data", {}).get("candles", [])
+        if not candles:
+            print(f"No candles returned for {instrument_key} at market open (9:15 AM IST) on {today_str}")
+            return None
+
+        # Candle format: [timestamp, open, high, low, close, volume, oi]
+        candle = candles[0]
+        if len(candle) < 2:
+            print(f"Unexpected candle format for {instrument_key} at market open on {today_str}: {candle}")
+            return None
+
+        _, open_price_val = candle[:2]
+        open_price_val = float(open_price_val)
+
+        print(f"✅ Current day open candle fetched for {username} - open_price={open_price_val} at 9:15 AM on {today_str}")
+        return open_price_val
+    except Exception as e:
+        print(f"Error fetching current-day open candle for {instrument_key} on {today_str}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 
 async def fetch_and_store_previous_day_data(username: str) -> Optional[Dict]:
     """
@@ -574,11 +692,14 @@ async def fetch_and_store_previous_day_data(username: str) -> Optional[Dict]:
 # Track which date we've already fetched previous-day stats for (per user)
 _prev_day_stats_fetched_for: Dict[str, str] = {}
 
+# Track which date we've already fetched current-day opening candle for (per user)
+_current_day_open_candle_fetched_for: Dict[str, str] = {}
+
 
 async def polling_worker():
     """Background worker that polls Upstox API every 5 seconds"""
     global latest_data, raw_option_chain, polling_active, should_poll, baseline_greeks
-    global price_history, full_day_price_history, open_price, market_open_time
+    global price_history, full_day_price_history, open_price, market_open_time, open_price_from_candle
     global _data_sequence, _last_successful_poll, _stall_warning_sent
     
     polling_active = True
@@ -805,6 +926,32 @@ async def polling_worker():
                                 )
                     except Exception as e:
                         print(f"⚠️  Error in auto-fetching previous-day data for {current_user}: {e}")
+
+                    # STAGGERED: Fetch current day's 1-minute open candle (with 1-second delay to avoid API clash)
+                    # This ensures we get the accurate open price from 9:15 AM instead of relying on spot price
+                    global open_price_from_candle
+                    try:
+                        now_utc = datetime.now(timezone.utc)
+                        now_ist = now_utc + timedelta(hours=5, minutes=30)
+                        today_str = now_ist.strftime("%Y-%m-%d")
+                        last_open_candle_date = _current_day_open_candle_fetched_for.get(current_user)
+
+                        if last_open_candle_date != today_str:
+                            # Add small delay (1 second) to stagger API calls and avoid clashes
+                            await asyncio.sleep(1)
+                            
+                            instrument_key = "NSE_INDEX|Nifty 50"
+                            candle_open_price = await fetch_current_day_open_candle(current_user, instrument_key)
+                            
+                            if candle_open_price is not None:
+                                _current_day_open_candle_fetched_for[current_user] = today_str
+                                open_price_from_candle = candle_open_price
+                                print(f"🎯 Using accurate market open price from 9:15 AM candle: {candle_open_price}")
+                            else:
+                                print(f"⚠️  Could not fetch current-day open candle for {current_user}. Will use first spot price.")
+                    except Exception as e:
+                        print(f"⚠️  Error in auto-fetching current-day open candle for {current_user}: {e}")
+
 
                     volatility_metrics = calculate_volatility_metrics(
                         current_price=current_price,

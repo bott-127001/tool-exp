@@ -176,7 +176,7 @@ def calculate_rea(
     Range Extension Asymmetry (REA)
 
     Define Initial Balance (IB) as first X minutes of the session.
-    NOTE: Currently set to 5 minutes for testing. Change back to 60 minutes for production.
+    NOTE: Currently set to 45 minutes (9:15 AM to 10:00 AM IST).
 
     IB_high, IB_low
     IB_range = IB_high - IB_low
@@ -220,8 +220,8 @@ def calculate_rea(
         effective_start = session_start
 
     # Split IB vs rest of day based on X minutes from session_start
-    # TODO: Change back to 60 minutes for production after testing
-    ib_minutes = 5  # Testing: 5 minutes. Production: 60 minutes
+    # Changed to 45 minutes for production
+    ib_minutes = 45  # Initial Balance period: 45 minutes
     ib_end = effective_start + timedelta(minutes=ib_minutes)
     
     # Ensure all timestamps are timezone-aware for comparison
