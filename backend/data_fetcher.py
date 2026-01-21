@@ -622,14 +622,14 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
 
         candles = data.get("data", {}).get("candles", [])
         if not candles:
-            print(f"No candles returned for {intraday_instrument_key} on {today_str}")
+            print(f"No candles returned for {instrument_key_encoded} on {today_str}")
             return None
 
         # Candle format: [timestamp, open, high, low, close, volume, oi]
         # Get the open price from first 1-minute candle (9:15 AM)
         candle = candles[0]
         if len(candle) < 2:
-            print(f"Unexpected candle format for {intraday_instrument_key} on {today_str}: {candle}")
+            print(f"Unexpected candle format for {instrument_key_encoded} on {today_str}: {candle}")
             return None
 
         _, open_price_val = candle[:2]
