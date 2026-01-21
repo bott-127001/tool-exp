@@ -599,11 +599,11 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
         "Accept": "application/json",
     }
 
-    # V3 intraday candle endpoint for current day
-    # Format: /v3/intraday-candle/{instrument_key}/minutes/1?date=YYYY-MM-DD&limit=1
-    # Returns only the first 1-minute candle (9:15 AM opening candle)
-    # Limit=1 optimizes API response to fetch only the opening candle
-    url = f"{UPSTOX_BASE_URL_V3}/intraday-candle/{instrument_key}/minutes/1?date={today_str}&limit=1"
+    # V3 historical candle endpoint for current day
+    # Use 1-day timeframe with from_date = to_date = today to get today's OHLC
+    # This includes the opening price for the current trading day
+    # Format: /v3/historical-candle/{instrument_key}/days/1/{from_date}/{to_date}
+    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/{instrument_key}/days/1/{today_str}/{today_str}"
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -624,8 +624,7 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
             return None
 
         # Candle format: [timestamp, open, high, low, close, volume, oi]
-        # The first candle should be the 9:15 AM 1-minute candle
-        # Verify it's actually from 9:15 AM by checking the timestamp
+        # Get the open price from today's daily candle
         candle = candles[0]
         if len(candle) < 2:
             print(f"Unexpected candle format for {instrument_key} on {today_str}: {candle}")
@@ -634,7 +633,7 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
         _, open_price_val = candle[:2]
         open_price_val = float(open_price_val)
 
-        print(f"✅ Current day open candle fetched for {username} - open_price={open_price_val} at 9:15 AM on {today_str}")
+        print(f"✅ Current day open candle fetched for {username} - open_price={open_price_val} on {today_str}")
         return open_price_val
     except Exception as e:
         print(f"Error fetching current-day open candle for {instrument_key} on {today_str}: {e}")
