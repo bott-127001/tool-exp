@@ -599,11 +599,13 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
         "Accept": "application/json",
     }
 
-    # V3 historical candle endpoint for current day
-    # Use 1-day timeframe with from_date = to_date = today to get today's OHLC
-    # This includes the opening price for the current trading day
-    # Format: /v3/historical-candle/{instrument_key}/days/1/{from_date}/{to_date}
-    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/{instrument_key}/days/1/{today_str}/{today_str}"
+    # V3 intraday candle endpoint for current day
+    # Try with just the symbol name (not NSE_INDEX| prefix) for intraday endpoint
+    # Format: /v3/intraday-candle/{instrument_key}/minutes/1?date=YYYY-MM-DD&limit=1
+    intraday_instrument_key = "NSE_INDEX|Nifty 50"  # Try without NSE_INDEX| prefix
+    url = f"{UPSTOX_BASE_URL_V3}/intraday-candle/{intraday_instrument_key}/minutes/1?date={today_str}&limit=1"
+    
+    print(f"🔍 Fetching intraday candle from: {url}")
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -620,14 +622,14 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
 
         candles = data.get("data", {}).get("candles", [])
         if not candles:
-            print(f"No candles returned for {instrument_key} on {today_str}")
+            print(f"No candles returned for {intraday_instrument_key} on {today_str}")
             return None
 
         # Candle format: [timestamp, open, high, low, close, volume, oi]
-        # Get the open price from today's daily candle
+        # Get the open price from first 1-minute candle (9:15 AM)
         candle = candles[0]
         if len(candle) < 2:
-            print(f"Unexpected candle format for {instrument_key} on {today_str}: {candle}")
+            print(f"Unexpected candle format for {intraday_instrument_key} on {today_str}: {candle}")
             return None
 
         _, open_price_val = candle[:2]
