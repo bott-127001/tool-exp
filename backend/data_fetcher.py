@@ -163,7 +163,7 @@ async def fetch_previous_day_ohlc(username: str, instrument_key: str, target_dat
         high = float(h)
         low = float(l)
         close = float(c)
-        rng = high - low
+        rng = round(high - low, 2)
 
         return {
             "high": high,
@@ -964,6 +964,17 @@ async def polling_worker():
                     except Exception as e:
                         print(f"⚠️  Error in auto-fetching current-day open candle for {current_user}: {e}")
 
+                    # Guard against missing open_price or market_open_time, which can happen
+                    # if state is reset by another task (e.g., API call) during a poll.
+                    if open_price is None or market_open_time is None:
+                        print(f"⚠️ Skipping metrics: open_price or market_open_time is not yet available. This can happen after a state reset.")
+                        # Adaptive sleep to maintain polling interval
+                        poll_duration = (datetime.now(timezone.utc) - poll_start_time).total_seconds()
+                        sleep_time = max(0, 5.0 - poll_duration)
+                        if sleep_time > 0:
+                            await asyncio.sleep(sleep_time)
+                        continue
+
 
                     volatility_metrics = calculate_volatility_metrics(
                         current_price=current_price,
@@ -986,6 +997,7 @@ async def polling_worker():
                         market_open_time=market_open_time,
                         current_time=current_time_utc,
                         settings=settings,
+                        open_price=open_price,
                     )
 
                     # Detect signals - PASS CHANGE INSTEAD OF ABSOLUTE VALUES

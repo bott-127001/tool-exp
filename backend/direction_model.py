@@ -403,6 +403,7 @@ def calculate_direction_metrics(
     market_open_time: Optional[datetime],
     current_time: Optional[datetime] = None,
     settings: Optional[Dict] = None,
+    open_price: Optional[float] = None,
 ) -> Dict:
     """
     High-level entry point to compute all Direction & Asymmetry metrics.
@@ -484,7 +485,9 @@ def calculate_direction_metrics(
     intraday_prices = history_sorted
 
     # Current open / close for today
-    open_price = intraday_prices[0]["price"]
+    if open_price is None:
+        open_price = intraday_prices[0]["price"]
+        
     close_price = intraday_prices[-1]["price"]
 
     opening = calculate_gap_and_acceptance(
@@ -531,5 +534,3 @@ def calculate_direction_metrics(
         "directional_state": directional_state,
         "directional_info": directional_info,
     }
-
-
