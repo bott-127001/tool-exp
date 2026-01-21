@@ -599,11 +599,11 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
         "Accept": "application/json",
     }
 
-    # V3 historical-candle intraday endpoint for current day
-    # Format: /v3/historical-candle/intraday/{instrument_key}/{unit}/{interval}?date=YYYY-MM-DD
+    # V3 historical-candle endpoint with 1-minute interval for current day
+    # Format: /v3/historical-candle/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}
     # URL-encode: | becomes %7C, space becomes %20
-    intraday_instrument_key = "NSE_INDEX%7CNifty%2050"
-    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/intraday/{intraday_instrument_key}/minutes/1?date={today_str}&limit=1"
+    instrument_key_encoded = "NSE_INDEX%7CNifty%2050"
+    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/{instrument_key_encoded}/minutes/1/{today_str}/{today_str}"
     
     print(f"🔍 Fetching intraday candle from: {url}")
 
