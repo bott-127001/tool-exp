@@ -601,8 +601,10 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
 
     # V3 Intraday Candle Endpoint
     # Format: /v3/historical-candle/intraday/{instrument_key}/{interval}
+    # Format: /v3/historical-candle/intraday/{instrument_key}/{unit}/{interval}
     instrument_key_encoded = "NSE_INDEX%7CNifty%2050"
     url = f"{UPSTOX_BASE_URL_V3}/historical-candle/intraday/{instrument_key_encoded}/1minute"
+    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/intraday/{instrument_key_encoded}/minutes/1"
     
     print(f"🔍 Fetching intraday candle from: {url}")
 
