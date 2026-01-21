@@ -599,11 +599,10 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
         "Accept": "application/json",
     }
 
-    # V3 historical-candle endpoint with 1-minute interval for current day
-    # Format: /v3/historical-candle/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}
-    # URL-encode: | becomes %7C, space becomes %20
+    # V3 Intraday Candle Endpoint
+    # Format: /v3/historical-candle/intraday/{instrument_key}/{interval}
     instrument_key_encoded = "NSE_INDEX%7CNifty%2050"
-    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/{instrument_key_encoded}/minutes/1/{today_str}/{today_str}"
+    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/intraday/{instrument_key_encoded}/1minute"
     
     print(f"🔍 Fetching intraday candle from: {url}")
 
@@ -625,15 +624,20 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
             print(f"No candles returned for {instrument_key_encoded} on {today_str}")
             return None
 
+        # Find the 9:15 AM candle
         # Candle format: [timestamp, open, high, low, close, volume, oi]
-        # Get the open price from first 1-minute candle (9:15 AM)
-        candle = candles[0]
-        if len(candle) < 2:
-            print(f"Unexpected candle format for {instrument_key_encoded} on {today_str}: {candle}")
-            return None
+        # Timestamp example: "2023-10-27T09:15:00+05:30"
+        target_time_str = "09:15:00"
+        open_price_val = None
+        
+        for candle in candles:
+            if target_time_str in candle[0]:
+                open_price_val = float(candle[1])
+                break
 
-        _, open_price_val = candle[:2]
-        open_price_val = float(open_price_val)
+        if open_price_val is None:
+            print(f"⚠️ 9:15 AM candle not found in intraday data for {today_str}")
+            return None
 
         print(f"✅ Current day open candle fetched for {username} - open_price={open_price_val} on {today_str}")
         return open_price_val
@@ -950,6 +954,10 @@ async def polling_worker():
                             if candle_open_price is not None:
                                 _current_day_open_candle_fetched_for[current_user] = today_str
                                 open_price_from_candle = candle_open_price
+                                # Update global open_price if it differs (e.g. was set by spot price earlier)
+                                if open_price != candle_open_price:
+                                    open_price = candle_open_price
+                                    print(f"🔄 Updated day's open price to accurate candle open: {open_price}")
                                 print(f"🎯 Using accurate market open price from 9:15 AM candle: {candle_open_price}")
                             else:
                                 print(f"⚠️  Could not fetch current-day open candle for {current_user}. Will use first spot price.")
