@@ -238,7 +238,7 @@ def determine_market_state(
         })
     
     # Default fallback
-    return ("CONTRACTION", {
+    return ("UNKNOWN", {
         "reason": "Default state - conditions not met for Transition or Expansion",
         "action": "NO TRADE",
         "rv_ratio": rv_ratio,
