@@ -9,24 +9,16 @@ from datetime import datetime, timedelta, timezone
 
 def calculate_rv_current(price_series_15min: Optional[List[float]]) -> Optional[float]:
     """
-    Calculate RV(current) - 15-minute realized volatility using micro-moves.
-
-    Within the last 15 minutes of prices, RV_current(t) is defined as:
-
-        RV_current(t) = Σ |Price_i − Price_(i−1)|
-
-    This captures speed, activity, and urgency instead of just net drift.
+    Calculate RV(current) - 15-minute displacement.
+    
+    RV_current = abs(Price_last - Price_first) over the 15-minute window.
     """
     if not price_series_15min or len(price_series_15min) < 2:
         return None
 
-    rv = 0.0
-    prev_price = price_series_15min[0]
-    for price in price_series_15min[1:]:
-        rv += abs(price - prev_price)
-        prev_price = price
-
-    return rv
+    # Use the most recent 15-min window as RV_current
+    # Price_last_tick is the last element, Price_first_tick is the first element of the 15min series
+    return abs(price_series_15min[-1] - price_series_15min[0])
 
 
 def calculate_rv_open_normalized(current_price: float, open_price: float, 
@@ -156,7 +148,7 @@ def calculate_iv_vwap(options: List[Dict], atm_strike: float) -> Optional[float]
 
 def determine_market_state(
     rv_ratio: Optional[float],
-    rv_ratio_prev: Optional[float],
+    rv_ratio_delta: Optional[float],
     iv_atm: Optional[float],
     iv_vwap: Optional[float],
     market_open_time: Optional[datetime] = None,
@@ -206,10 +198,8 @@ def determine_market_state(
     # threshold_low <= RV_ratio <= threshold_high
     # AND RV_ratio is increasing compared to previous interval
     # AND IV_cluster <= IV_VWAP
-    rv_ratio_delta = None
     is_accelerating = False
-    if rv_ratio is not None and rv_ratio_prev is not None:
-        rv_ratio_delta = rv_ratio - rv_ratio_prev
+    if rv_ratio_delta is not None:
         is_accelerating = rv_ratio_delta >= min_rv_ratio_acceleration
 
     
@@ -267,7 +257,7 @@ def calculate_volatility_metrics(
     options: List[Dict],
     atm_strike: float,
     underlying_price: float,
-    rv_ratio_prev: Optional[float] = None,
+    rv_current_prev: Optional[float] = None,
     rv_ratio_contraction_threshold: float = 0.8,
     rv_ratio_expansion_threshold: float = 1.5,
     min_rv_ratio_acceleration: float = 0.05,
@@ -285,15 +275,15 @@ def calculate_volatility_metrics(
     rv_ratio_delta = None
     if rv_current is not None and rv_open_norm is not None and rv_open_norm > 0:
         rv_ratio = rv_current / rv_open_norm
-        if rv_ratio_prev is not None:
-            rv_ratio_delta = rv_ratio - rv_ratio_prev
+        if rv_current_prev is not None and rv_current_prev > 0:
+            rv_ratio_delta = (rv_current / rv_current_prev) - 1
         
     iv_atm = get_iv_cluster(options, atm_strike)
     iv_vwap = calculate_iv_vwap(options, atm_strike)
     
     # Determine market state
     state_name, state_info = determine_market_state(
-        rv_ratio, rv_ratio_prev, iv_atm, iv_vwap, 
+        rv_ratio, rv_ratio_delta, iv_atm, iv_vwap, 
         market_open_time=market_open_time,
         current_time=current_time,
         rv_ratio_contraction_threshold=rv_ratio_contraction_threshold,
