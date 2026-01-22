@@ -72,8 +72,9 @@ async def init_db():
             "theta_threshold": 0.02,
             "gamma_threshold": 0.01,
             "consecutive_confirmations": 2,
-            # Volatility-permission thresholds
-            "vol_expansion_rv_multiplier": 1.5,
+            "vol_rv_ratio_contraction_threshold": 0.8,
+            "vol_rv_ratio_expansion_threshold": 1.5,
+            "vol_min_rv_ratio_acceleration": 0.05,
             # Direction & Asymmetry thresholds
             "dir_gap_acceptance_threshold": 0.65,
             "dir_acceptance_neutral_threshold": 0.5,
@@ -186,7 +187,9 @@ async def update_user_settings(username: str, settings: Dict) -> Optional[Dict]:
         "theta_threshold": settings.get("theta_threshold"),
         "gamma_threshold": settings.get("gamma_threshold"),
         "consecutive_confirmations": settings.get("consecutive_confirmations"),
-        "vol_expansion_rv_multiplier": settings.get("vol_expansion_rv_multiplier"),
+        "vol_rv_ratio_contraction_threshold": settings.get("vol_rv_ratio_contraction_threshold"),
+        "vol_rv_ratio_expansion_threshold": settings.get("vol_rv_ratio_expansion_threshold"),
+        "vol_min_rv_ratio_acceleration": settings.get("vol_min_rv_ratio_acceleration"),
         "dir_gap_acceptance_threshold": settings.get("dir_gap_acceptance_threshold"),
         "dir_acceptance_neutral_threshold": settings.get("dir_acceptance_neutral_threshold"),
         "dir_rea_bull_threshold": settings.get("dir_rea_bull_threshold"),

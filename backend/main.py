@@ -197,8 +197,9 @@ async def get_settings(user: str):
             "theta_threshold": 0.02,
             "gamma_threshold": 0.01,
             "consecutive_confirmations": 2,
-            # Volatility-permission thresholds
-            "vol_expansion_rv_multiplier": 1.5,
+            "vol_rv_ratio_contraction_threshold": 0.8,
+            "vol_rv_ratio_expansion_threshold": 1.5,
+            "vol_min_rv_ratio_acceleration": 0.05,
             # Direction & Asymmetry thresholds
             "dir_gap_acceptance_threshold": 0.65,
             "dir_acceptance_neutral_threshold": 0.5,

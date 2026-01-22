@@ -155,15 +155,16 @@ def calculate_iv_vwap(options: List[Dict], atm_strike: float) -> Optional[float]
 
 
 def determine_market_state(
-    rv_current: Optional[float],
-    rv_open_norm: Optional[float],
-    rv_current_prev: Optional[float],
+    rv_ratio: Optional[float],
+    rv_ratio_prev: Optional[float],
     iv_atm: Optional[float],
     iv_vwap: Optional[float],
     market_open_time: Optional[datetime] = None,
     current_time: Optional[datetime] = None,
-    expansion_rv_multiplier: float = 1.5,
     transition_minutes_guardrail: int = 30,
+    rv_ratio_contraction_threshold: float = 0.8,
+    rv_ratio_expansion_threshold: float = 1.5,
+    min_rv_ratio_acceleration: float = 0.05,
 ) -> Tuple[str, Dict]:
     """
     Determine market state: CONTRACTION, TRANSITION, or EXPANSION
@@ -175,11 +176,10 @@ def determine_market_state(
         (state_name, state_info)
     """
     # If we don't have enough data, return unknown
-    if rv_current is None or rv_open_norm is None or iv_atm is None or iv_vwap is None:
+    if rv_ratio is None or iv_atm is None or iv_vwap is None:
         return ("UNKNOWN", {
             "reason": "Insufficient data",
-            "rv_current": rv_current,
-            "rv_open_norm": rv_open_norm,
+            "rv_ratio": rv_ratio,
             "iv_atm": iv_atm,
             "iv_vwap": iv_vwap
         })
@@ -192,36 +192,34 @@ def determine_market_state(
         within_guardrail = minutes_since_open < transition_minutes_guardrail
     
     # CONTRACTION (NO TRADE)
-    # Conditions:
-    # - RV_current < RV_open_norm
-    # - IV <= IV_VWAP
-    if rv_current < rv_open_norm and iv_atm <= iv_vwap:
+    # RV_ratio < threshold AND IV_cluster <= IV_VWAP
+    if rv_ratio < rv_ratio_contraction_threshold and iv_atm <= iv_vwap:
         return ("CONTRACTION", {
-            "reason": "Market moving slower than average and IV not repriced",
+            "reason": f"RV_ratio < {rv_ratio_contraction_threshold} (Low Volatility) and IV not repriced",
             "action": "NO TRADE - No naked buying",
-            "rv_current": rv_current,
-            "rv_open_norm": rv_open_norm,
+            "rv_ratio": rv_ratio,
             "iv_atm": iv_atm,
             "iv_vwap": iv_vwap
         })
     
     # TRANSITION (ONLY VALID ENTRY ZONE)
-    # Conditions:
-    # - RV_current > RV_open_norm
-    # - RV_current(t) > RV_current(t-1) (accelerating)
-    # - IV <= IV_VWAP
-    # - GUARDRAIL: At least X minutes must have passed since market open
-    is_accelerating = rv_current_prev is not None and rv_current > rv_current_prev
-    transition_conditions_met = rv_current > rv_open_norm and is_accelerating and iv_atm <= iv_vwap
+    # threshold_low <= RV_ratio <= threshold_high
+    # AND RV_ratio is increasing compared to previous interval
+    # AND IV_cluster <= IV_VWAP
+    rv_ratio_delta = None
+    is_accelerating = False
+    if rv_ratio is not None and rv_ratio_prev is not None:
+        rv_ratio_delta = rv_ratio - rv_ratio_prev
+        is_accelerating = rv_ratio_delta >= min_rv_ratio_acceleration
+
     
-    if transition_conditions_met:
+    if rv_ratio_contraction_threshold <= rv_ratio <= rv_ratio_expansion_threshold and is_accelerating and iv_atm <= iv_vwap:
         if within_guardrail:
             # Guardrail: Force CONTRACTION if within guardrail period
             return ("CONTRACTION", {
                 "reason": f"TRANSITION blocked by guardrail - less than {transition_minutes_guardrail} minutes from open",
                 "action": "NO TRADE - Wait for guardrail period to pass",
-                "rv_current": rv_current,
-                "rv_open_norm": rv_open_norm,
+                "rv_ratio": rv_ratio,
                 "iv_atm": iv_atm,
                 "iv_vwap": iv_vwap,
                 "guardrail_active": True,
@@ -229,62 +227,31 @@ def determine_market_state(
             })
         else:
             return ("TRANSITION", {
-                "reason": "Volatility accelerating but IV not repriced yet",
+                "reason": f"RV_ratio in transition zone ({rv_ratio_contraction_threshold}-{rv_ratio_expansion_threshold}) and accelerating (delta >= {min_rv_ratio_acceleration}), IV stable",
                 "action": "VALID ENTRY ZONE - Buy options here",
-                "rv_current": rv_current,
-                "rv_open_norm": rv_open_norm,
+                "rv_ratio": rv_ratio,
+                "rv_ratio_delta": rv_ratio_delta,
                 "iv_atm": iv_atm,
                 "iv_vwap": iv_vwap,
                 "is_accelerating": True
             })
     
     # EXPANSION (DO NOT ENTER FRESH)
-    # Conditions:
-    # - RV_current >> RV_open_norm (much greater)
-    # - IV > IV_VWAP
-    # Both conditions must be true (AND)
-    if rv_current > rv_open_norm * expansion_rv_multiplier and iv_atm > iv_vwap:
+    # RV_ratio > threshold AND IV_cluster > IV_VWAP
+    if rv_ratio > rv_ratio_expansion_threshold and iv_atm > iv_vwap:
         return ("EXPANSION", {
-            "reason": "Volatility already released and options repriced",
+            "reason": f"RV_ratio > {rv_ratio_expansion_threshold} (High Volatility) and IV repriced",
             "action": "DO NOT ENTER FRESH - Manage existing trades only",
-            "rv_current": rv_current,
-            "rv_open_norm": rv_open_norm,
+            "rv_ratio": rv_ratio,
             "iv_atm": iv_atm,
             "iv_vwap": iv_vwap
         })
     
-    # Default to TRANSITION if RV_current > RV_open_norm but not accelerating
-    # BUT: Apply guardrail here too
-    if rv_current > rv_open_norm:
-        if within_guardrail:
-            # Guardrail: Force CONTRACTION if within guardrail period
-            return ("CONTRACTION", {
-                "reason": f"TRANSITION blocked by guardrail - less than {transition_minutes_guardrail} minutes from open",
-                "action": "NO TRADE - Wait for guardrail period to pass",
-                "rv_current": rv_current,
-                "rv_open_norm": rv_open_norm,
-                "iv_atm": iv_atm,
-                "iv_vwap": iv_vwap,
-                "guardrail_active": True,
-                "minutes_since_open": (current_time - market_open_time).total_seconds() / 60 if market_open_time and current_time else None
-            })
-        else:
-            return ("TRANSITION", {
-                "reason": "Volatility above average but not accelerating",
-                "action": "Monitor - Entry may be valid if acceleration occurs",
-                "rv_current": rv_current,
-                "rv_open_norm": rv_open_norm,
-                "iv_atm": iv_atm,
-                "iv_vwap": iv_vwap,
-                "is_accelerating": False
-            })
-    
     # Default fallback
     return ("CONTRACTION", {
-        "reason": "Default state - market conditions unclear",
+        "reason": "Default state - conditions not met for Transition or Expansion",
         "action": "NO TRADE",
-        "rv_current": rv_current,
-        "rv_open_norm": rv_open_norm,
+        "rv_ratio": rv_ratio,
         "iv_atm": iv_atm,
         "iv_vwap": iv_vwap
     })
@@ -300,8 +267,10 @@ def calculate_volatility_metrics(
     options: List[Dict],
     atm_strike: float,
     underlying_price: float,
-    rv_current_prev: Optional[float] = None,
-    expansion_rv_multiplier: float = 1.5,
+    rv_ratio_prev: Optional[float] = None,
+    rv_ratio_contraction_threshold: float = 0.8,
+    rv_ratio_expansion_threshold: float = 1.5,
+    min_rv_ratio_acceleration: float = 0.05,
 ) -> Dict:
     """
     Calculate all volatility metrics and determine market state
@@ -311,20 +280,32 @@ def calculate_volatility_metrics(
     # Calculate metrics
     rv_current = calculate_rv_current(price_series_15min)
     rv_open_norm = calculate_rv_open_normalized(current_price, open_price, market_open_time, current_time)
+    
+    rv_ratio = None
+    rv_ratio_delta = None
+    if rv_current is not None and rv_open_norm is not None and rv_open_norm > 0:
+        rv_ratio = rv_current / rv_open_norm
+        if rv_ratio_prev is not None:
+            rv_ratio_delta = rv_ratio - rv_ratio_prev
+        
     iv_atm = get_iv_cluster(options, atm_strike)
     iv_vwap = calculate_iv_vwap(options, atm_strike)
     
     # Determine market state
     state_name, state_info = determine_market_state(
-        rv_current, rv_open_norm, rv_current_prev, iv_atm, iv_vwap, 
+        rv_ratio, rv_ratio_prev, iv_atm, iv_vwap, 
         market_open_time=market_open_time,
         current_time=current_time,
-        expansion_rv_multiplier=expansion_rv_multiplier
+        rv_ratio_contraction_threshold=rv_ratio_contraction_threshold,
+        rv_ratio_expansion_threshold=rv_ratio_expansion_threshold,
+        min_rv_ratio_acceleration=min_rv_ratio_acceleration
     )
     
     return {
         "rv_current": rv_current,
         "rv_open_norm": rv_open_norm,
+        "rv_ratio": rv_ratio,
+        "rv_ratio_delta": rv_ratio_delta,
         "iv_atm": iv_atm,
         "iv_vwap": iv_vwap,
         "market_state": state_name,
@@ -334,4 +315,3 @@ def calculate_volatility_metrics(
         "price_15min_ago": price_15min_ago,
         "timestamp": current_time.isoformat()
     }
-

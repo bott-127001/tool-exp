@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import axios from 'axios'
 import { useAuth } from './AuthContext'
+import axios from 'axios'
 
 function Settings() {
   const [settings, setSettings] = useState({
@@ -9,7 +9,9 @@ function Settings() {
     theta_threshold: 0.02,
     gamma_threshold: 0.01,
     consecutive_confirmations: 2,
-    vol_expansion_rv_multiplier: 1.5,
+    vol_rv_ratio_contraction_threshold: 0.8,
+    vol_rv_ratio_expansion_threshold: 1.5,
+    vol_min_rv_ratio_acceleration: 0.05,
     dir_gap_acceptance_threshold: 0.65,
     dir_acceptance_neutral_threshold: 0.5,
     dir_rea_bull_threshold: 0.3,
@@ -17,27 +19,29 @@ function Settings() {
     dir_rea_neutral_abs_threshold: 0.3,
     dir_de_directional_threshold: 0.5,
     dir_de_neutral_threshold: 0.3,
+    prev_day_close: '',
+    prev_day_range: ''
   })
-  const { currentUser } = useAuth();
+  
+  const { currentUser } = useAuth()
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    // Since this is a protected route, we can safely assume currentUser will be available.
     if (currentUser) {
-      const loadSettings = async () => {
+      const fetchSettings = async () => {
         try {
-          const response = await axios.get(`/api/settings/${currentUser}`);
+          const response = await axios.get(`/api/settings/${currentUser}`)
           if (response.data) {
-            setSettings(response.data);
+            setSettings(response.data)
           }
         } catch (error) {
-          console.error('Error loading settings:', error);
+          console.error('Error loading settings:', error)
         }
-      };
-      loadSettings();
+      }
+      fetchSettings()
     }
-  }, [currentUser]);
+  }, [currentUser])
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -47,22 +51,19 @@ function Settings() {
     }))
   }
 
-  const handleSave = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     setSaving(true)
     setMessage('')
 
     if (!currentUser) {
-      setMessage('Error: No user is logged in.');
-      setSaving(false);
-      return;
+      setMessage('Error: No user is logged in.')
+      setSaving(false)
+      return
     }
 
     try {
-      const response = await axios.put(
-        `/api/settings/${currentUser}`,
-        settings
-      )
+      await axios.put(`/api/settings/${currentUser}`, settings)
       setMessage('Settings saved successfully!')
       setTimeout(() => setMessage(''), 3000)
     } catch (error) {
@@ -75,79 +76,37 @@ function Settings() {
 
   const handleDownloadData = async () => {
     try {
-      setMessage('Preparing download...');
-      const response = await axios.get('/api/export-data', {
-        responseType: 'blob', // Important for file download
-      });
-      
+      setMessage("Preparing download...");
+      const response = await axios.get("/api/export-data", { responseType: "blob" });
       const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = url;
-      link.setAttribute('download', `market_data_log_${new Date().toISOString().slice(0,10)}.csv`);
+      link.setAttribute("download", `market_data_log_${new Date().toISOString().slice(0, 10)}.csv`);
       document.body.appendChild(link);
       link.click();
       link.remove();
-      setMessage('Download started!');
-      setTimeout(() => setMessage(''), 3000);
+      setMessage("Download started!");
+      setTimeout(() => setMessage(""), 3000);
     } catch (error) {
-      console.error('Error downloading data:', error);
-      setMessage('Error downloading data.');
+      console.error("Error downloading data:", error);
+      setMessage("Error downloading data.");
     }
   };
 
   const handleClearData = async () => {
-    if (!window.confirm(
-      'This will perform daily cleanup tasks:\n' +
-      '• Clear daily baselines\n' +
-      '• Clear all market data logs\n' +
-      '• Reset in-memory state\n\n' +
-      'This cannot be undone. Continue?'
-    )) {
-      return;
-    }
-
-    try {
-      setMessage('Running daily cleanup tasks...');
-      const response = await axios.delete('/api/clear-data');
-      const results = response.data.results || {};
-      const message = response.data.message || 'Cleanup completed';
-      const details = `Baselines: ${results.baselines_cleared || 0}, Market Data: ${results.market_data_cleared || 0} records`;
-      setMessage(`${message}. ${details}`);
-      setTimeout(() => setMessage(''), 5000);
-    } catch (error) {
-      console.error('Error running cleanup:', error);
-      setMessage(`Error: ${error.response?.data?.detail || 'Failed to run cleanup tasks'}`);
+    if (window.confirm("Are you sure you want to delete ALL collected market data? This cannot be undone.")) {
+      try {
+        setMessage("Clearing data...");
+        const response = await axios.delete("/api/clear-data");
+        setMessage(response.data.message);
+        setTimeout(() => setMessage(""), 3000);
+      } catch (error) {
+        console.error("Error clearing data:", error);
+        setMessage("Error clearing data.");
+      }
     }
   };
 
-  const handleClearTokens = async () => {
-    if (!window.confirm(
-      'This will clear access tokens for ALL users:\n' +
-      '• Access tokens will be nulled out\n' +
-      '• Refresh tokens will be nulled out\n' +
-      '• Users will need to re-login\n\n' +
-      'NOTE: Tokens are also automatically cleared at 3 AM IST daily.\n\n' +
-      'Continue?'
-    )) {
-      return;
-    }
-
-    try {
-      setMessage('Clearing access tokens...');
-      const response = await axios.delete('/api/clear-tokens');
-      const message = response.data.message || 'Tokens cleared';
-      const usersModified = response.data.users_modified || 0;
-      setMessage(`${message} (${usersModified} users affected)`);
-      setTimeout(() => setMessage(''), 5000);
-    } catch (error) {
-      console.error('Error clearing tokens:', error);
-      setMessage(`Error: ${error.response?.data?.detail || 'Failed to clear tokens'}`);
-    }
-  };
-
-  
-        
-       
   return (
     <>
       <div className="card">
@@ -156,255 +115,113 @@ function Settings() {
           <div style={{
             padding: '10px',
             marginBottom: '20px',
+            borderRadius: '4px',
             backgroundColor: message.includes('Error') ? '#f8d7da' : '#d4edda',
-            color: message.includes('Error') ? '#721c24' : '#155724',
-            borderRadius: '4px'
+            color: message.includes('Error') ? '#721c24' : '#155724'
           }}>
             {message}
           </div>
         )}
-
-        <form onSubmit={handleSave}>
+        <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="delta_threshold">Delta Threshold (absolute)</label>
-            <input
-              type="number"
-              id="delta_threshold"
-              name="delta_threshold"
-              value={settings.delta_threshold}
-              onChange={handleChange}
-              step="0.01"
-              min="0"
-              required
-            />
+            <input type="number" id="delta_threshold" name="delta_threshold" value={settings.delta_threshold} onChange={handleChange} step="0.01" min="0" required />
           </div>
-  
           <div className="form-group">
             <label htmlFor="vega_threshold">Vega Threshold (absolute)</label>
-            <input
-              type="number"
-              id="vega_threshold"
-              name="vega_threshold"
-              value={settings.vega_threshold}
-              onChange={handleChange}
-              step="0.01"
-              min="0"
-              required
-            />
+            <input type="number" id="vega_threshold" name="vega_threshold" value={settings.vega_threshold} onChange={handleChange} step="0.01" min="0" required />
           </div>
-
           <div className="form-group">
             <label htmlFor="theta_threshold">Theta Threshold (absolute)</label>
-            <input
-              type="number"
-              id="theta_threshold"
-              name="theta_threshold"
-              value={settings.theta_threshold}
-              onChange={handleChange}
-              step="0.01"
-              min="0"
-              required
-            />
+            <input type="number" id="theta_threshold" name="theta_threshold" value={settings.theta_threshold} onChange={handleChange} step="0.01" min="0" required />
           </div>
-
           <div className="form-group">
             <label htmlFor="gamma_threshold">Gamma Threshold (absolute)</label>
-            <input
-              type="number"
-              id="gamma_threshold"
-              name="gamma_threshold"
-              value={settings.gamma_threshold}
-              onChange={handleChange}
-              step="0.01"
-              min="0"
-              required
-            />
+            <input type="number" id="gamma_threshold" name="gamma_threshold" value={settings.gamma_threshold} onChange={handleChange} step="0.01" min="0" required />
           </div>
-
           <div className="form-group">
             <label htmlFor="consecutive_confirmations">Consecutive Confirmations</label>
-            <input
-              type="number"
-              id="consecutive_confirmations"
-              name="consecutive_confirmations"
-              value={settings.consecutive_confirmations}
-              onChange={handleChange}
-              step="1"
-              min="1"
-              required
-            />
+            <input type="number" id="consecutive_confirmations" name="consecutive_confirmations" value={settings.consecutive_confirmations} onChange={handleChange} step="1" min="1" required />
           </div>
 
           <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
-
           <h3>Volatility-Permission Thresholds</h3>
-
           <div className="form-group">
-            <label htmlFor="vol_expansion_rv_multiplier">Expansion RV Multiplier</label>
-            <input
-              type="number"
-              id="vol_expansion_rv_multiplier"
-              name="vol_expansion_rv_multiplier"
-              value={settings.vol_expansion_rv_multiplier}
-              onChange={handleChange}
-              step="0.1"
-              min="1"
-              required
-            />
+            <label htmlFor="vol_rv_ratio_contraction_threshold">RV Ratio Contraction Threshold (Default: 0.8)</label>
+            <input type="number" id="vol_rv_ratio_contraction_threshold" name="vol_rv_ratio_contraction_threshold" value={settings.vol_rv_ratio_contraction_threshold} onChange={handleChange} step="0.1" min="0" required />
+          </div>
+          <div className="form-group">
+            <label htmlFor="vol_rv_ratio_expansion_threshold">RV Ratio Expansion Threshold (Default: 1.5)</label>
+            <input type="number" id="vol_rv_ratio_expansion_threshold" name="vol_rv_ratio_expansion_threshold" value={settings.vol_rv_ratio_expansion_threshold} onChange={handleChange} step="0.1" min="0" required />
+          </div>
+          <div className="form-group">
+            <label htmlFor="vol_min_rv_ratio_acceleration">Min RV Ratio Acceleration (Default: 0.05)</label>
+            <input type="number" id="vol_min_rv_ratio_acceleration" name="vol_min_rv_ratio_acceleration" value={settings.vol_min_rv_ratio_acceleration} onChange={handleChange} step="0.01" min="0" required />
           </div>
 
           <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
-
           <h3>Direction & Asymmetry Thresholds</h3>
-
           <div className="form-group">
             <label htmlFor="dir_gap_acceptance_threshold">Gap Acceptance Threshold</label>
-            <input
-              type="number"
-              id="dir_gap_acceptance_threshold"
-              name="dir_gap_acceptance_threshold"
-              value={settings.dir_gap_acceptance_threshold}
-              onChange={handleChange}
-              step="0.01"
-              min="0"
-              max="1"
-              required
-            />
+            <input type="number" id="dir_gap_acceptance_threshold" name="dir_gap_acceptance_threshold" value={settings.dir_gap_acceptance_threshold} onChange={handleChange} step="0.01" min="0" max="1" required />
           </div>
-
           <div className="form-group">
             <label htmlFor="dir_acceptance_neutral_threshold">Acceptance Neutral Threshold</label>
-            <input
-              type="number"
-              id="dir_acceptance_neutral_threshold"
-              name="dir_acceptance_neutral_threshold"
-              value={settings.dir_acceptance_neutral_threshold}
-              onChange={handleChange}
-              step="0.01"
-              min="0"
-              max="1"
-              required
-            />
+            <input type="number" id="dir_acceptance_neutral_threshold" name="dir_acceptance_neutral_threshold" value={settings.dir_acceptance_neutral_threshold} onChange={handleChange} step="0.01" min="0" max="1" required />
           </div>
-
           <div className="form-group">
             <label htmlFor="dir_rea_bull_threshold">REA Bull Threshold</label>
-            <input
-              type="number"
-              id="dir_rea_bull_threshold"
-              name="dir_rea_bull_threshold"
-              value={settings.dir_rea_bull_threshold}
-              onChange={handleChange}
-              step="0.01"
-              required
-            />
+            <input type="number" id="dir_rea_bull_threshold" name="dir_rea_bull_threshold" value={settings.dir_rea_bull_threshold} onChange={handleChange} step="0.01" required />
           </div>
-
           <div className="form-group">
             <label htmlFor="dir_rea_bear_threshold">REA Bear Threshold</label>
-            <input
-              type="number"
-              id="dir_rea_bear_threshold"
-              name="dir_rea_bear_threshold"
-              value={settings.dir_rea_bear_threshold}
-              onChange={handleChange}
-              step="0.01"
-              required
-            />
+            <input type="number" id="dir_rea_bear_threshold" name="dir_rea_bear_threshold" value={settings.dir_rea_bear_threshold} onChange={handleChange} step="0.01" required />
           </div>
-
           <div className="form-group">
             <label htmlFor="dir_rea_neutral_abs_threshold">REA Neutral |value| Threshold</label>
-            <input
-              type="number"
-              id="dir_rea_neutral_abs_threshold"
-              name="dir_rea_neutral_abs_threshold"
-              value={settings.dir_rea_neutral_abs_threshold}
-              onChange={handleChange}
-              step="0.01"
-              required
-            />
+            <input type="number" id="dir_rea_neutral_abs_threshold" name="dir_rea_neutral_abs_threshold" value={settings.dir_rea_neutral_abs_threshold} onChange={handleChange} step="0.01" required />
           </div>
-
           <div className="form-group">
             <label htmlFor="dir_de_directional_threshold">DE Directional Threshold</label>
-            <input
-              type="number"
-              id="dir_de_directional_threshold"
-              name="dir_de_directional_threshold"
-              value={settings.dir_de_directional_threshold}
-              onChange={handleChange}
-              step="0.01"
-              min="0"
-              max="1"
-              required
-            />
+            <input type="number" id="dir_de_directional_threshold" name="dir_de_directional_threshold" value={settings.dir_de_directional_threshold} onChange={handleChange} step="0.01" min="0" max="1" required />
           </div>
-
           <div className="form-group">
             <label htmlFor="dir_de_neutral_threshold">DE Neutral Threshold</label>
-            <input
-              type="number"
-              id="dir_de_neutral_threshold"
-              name="dir_de_neutral_threshold"
-              value={settings.dir_de_neutral_threshold}
-              onChange={handleChange}
-              step="0.01"
-              min="0"
-              max="1"
-              required
-            />
+            <input type="number" id="dir_de_neutral_threshold" name="dir_de_neutral_threshold" value={settings.dir_de_neutral_threshold} onChange={handleChange} step="0.01" min="0" max="1" required />
           </div>
 
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={saving}
-          >
+          <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
+          <h3>Previous Day Inputs (Optional)</h3>
+          <p style={{ marginBottom: '10px', color: '#666', fontSize: '14px' }}>
+            Use these only when previous day data is not available from the broker. They feed into the Opening Location & Gap Acceptance calculations.
+          </p>
+          <div className="form-group">
+            <label htmlFor="prev_day_close">Previous Day Close</label>
+            <input type="number" id="prev_day_close" name="prev_day_close" value={settings.prev_day_close ?? ''} onChange={handleChange} step="0.05" min="0" />
+          </div>
+          <div className="form-group">
+            <label htmlFor="prev_day_range">Previous Day Range (High - Low)</label>
+            <input type="number" id="prev_day_range" name="prev_day_range" value={settings.prev_day_range ?? ''} onChange={handleChange} step="0.05" min="0" />
+          </div>
+
+          <button type="submit" className="btn btn-primary" disabled={saving}>
             {saving ? 'Saving...' : 'Save Settings'}
           </button>
         </form>
 
         <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
-        
-        <h3>Data Export & Cleanup</h3>
+        <h3>Data Export</h3>
         <p style={{ marginBottom: '15px', color: '#666' }}>
           Download the collected market data (Greeks, Signals, Prices) for Machine Learning analysis.
         </p>
-        <p style={{ marginBottom: '15px', fontSize: '14px', color: '#856404', backgroundColor: '#fff3cd', padding: '10px', borderRadius: '4px' }}>
-          <strong>Daily Cleanup:</strong> The "Run Daily Cleanup" button clears daily baselines, market data logs, and resets in-memory state.
-          <br />
-          <strong>Clear Tokens:</strong> The "Clear Access Tokens" button nulls out all user tokens (users will need to re-login). 
-          Tokens are also automatically cleared at 3 AM IST daily.
-        </p>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button 
-            onClick={handleDownloadData}
-            className="btn"
-            style={{ backgroundColor: '#28a745', color: 'white', border: 'none' }}
-          >
+          <button onClick={handleDownloadData} className="btn" style={{ backgroundColor: '#28a745', color: 'white', border: 'none' }}>
             Download ML Data (CSV)
           </button>
-
-          <button 
-            onClick={handleClearData}
-            className="btn"
-            style={{ backgroundColor: '#dc3545', color: 'white', border: 'none' }}
-          >
-            Run Daily Cleanup
-          </button>
-
-          <button 
-            onClick={handleClearTokens}
-            className="btn"
-            style={{ backgroundColor: '#ff6b35', color: 'white', border: 'none' }}
-          >
-            Clear Access Tokens
+          <button onClick={handleClearData} className="btn" style={{ backgroundColor: '#dc3545', color: 'white', border: 'none' }}>
+            Clear All Data
           </button>
         </div>
-        
-
-        
       </div>
     </>
   )
