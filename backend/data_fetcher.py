@@ -10,6 +10,7 @@ from utils import aggregate_greeks_atm_otm
 from volatility_model import calculate_volatility_metrics
 from direction_model import calculate_direction_metrics
 import json
+import urllib.parse
 
 
 def get_tuesday_expiry() -> str:
@@ -133,7 +134,8 @@ async def fetch_previous_day_ohlc(username: str, instrument_key: str, target_dat
     # V3 historical candle endpoint:
     # /v3/historical-candle/{instrument_key}/days/1/{from_date}/{to_date}
     # Use same date for from/to to get single daily candle
-    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/{instrument_key}/days/1/{target_date}/{target_date}"
+    instrument_key_encoded = urllib.parse.quote(instrument_key)
+    url = f"{UPSTOX_BASE_URL_V3}/historical-candle/{instrument_key_encoded}/days/1/{target_date}/{target_date}"
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -601,7 +603,9 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
 
     # V3 Intraday Candle Endpoint
     # Format: /v3/historical-candle/intraday/{instrument_key}/{unit}/{interval}
-    instrument_key_encoded = "NSE_INDEX%7CNifty%2050"
+    # We pass the instrument_key unencoded to httpx if we use params, but for path params we must encode carefully.
+    # Using urllib.parse.quote ensures we get 'NSE_INDEX%7CNifty%2050' which is correct.
+    instrument_key_encoded = urllib.parse.quote(instrument_key)
     url = f"{UPSTOX_BASE_URL_V3}/historical-candle/intraday/{instrument_key_encoded}/minutes/1"
     
     print(f"🔍 Fetching intraday candle from: {url}")
@@ -621,23 +625,34 @@ async def fetch_current_day_open_candle(username: str, instrument_key: str) -> O
 
         candles = data.get("data", {}).get("candles", [])
         if not candles:
-            print(f"No candles returned for {instrument_key_encoded} on {today_str}")
+            print(f"⚠️ No candles returned for {instrument_key} on {today_str}. API Response: {data}")
             return None
 
-        # Find the 9:15 AM candle
+        # Sort candles by timestamp ascending (oldest first) to ensure we get the first candle of the day
         # Candle format: [timestamp, open, high, low, close, volume, oi]
-        # Timestamp example: "2023-10-27T09:15:00+05:30"
-        target_time_str = "09:15:00"
+        candles.sort(key=lambda x: x[0])
+
         open_price_val = None
         
+        # 1. Try to find exact 09:15:00 candle
         for candle in candles:
-            if target_time_str in candle[0]:
+            if "T09:15:00" in candle[0]:
                 open_price_val = float(candle[1])
                 break
 
+        # 2. Fallback: If exact 9:15 not found, use the earliest candle available for today
         if open_price_val is None:
-            print(f"⚠️ 9:15 AM candle not found in intraday data for {today_str}")
-            return None
+            first_candle = candles[0]
+            timestamp_str = first_candle[0]
+            print(f"⚠️ Exact 9:15 AM candle not found. Earliest available is: {timestamp_str}")
+            
+            # Verify it is indeed today's data and reasonably close to open (before 09:30)
+            if today_str in timestamp_str and ("T09:1" in timestamp_str or "T09:2" in timestamp_str):
+                 open_price_val = float(first_candle[1])
+                 print(f"⚠️ Using earliest available candle ({timestamp_str}) as open price.")
+            else:
+                 print(f"❌ Earliest candle {timestamp_str} is too late or wrong date. Cannot determine open price.")
+                 return None
 
         print(f"✅ Current day open candle fetched for {username} - open_price={open_price_val} on {today_str}")
         return open_price_val
