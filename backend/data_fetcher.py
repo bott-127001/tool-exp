@@ -916,7 +916,7 @@ async def polling_worker():
                     
                     # Get previous RV(current) for acceleration check
                     prev_volatility_data = latest_data.get("volatility_metrics") if latest_data else None
-                    rv_current_prev = prev_volatility_data.get("rv_current") if prev_volatility_data else None
+                    rv_ratio_prev = prev_volatility_data.get("rv_ratio") if prev_volatility_data else None
                     
                     # Calculate volatility metrics
                     price_15min_ago = get_price_15min_ago(current_time_utc)
@@ -1001,7 +1001,9 @@ async def polling_worker():
                         options=normalized_data["options"],
                         atm_strike=normalized_data["atm_strike"],
                         underlying_price=current_price,
-                        rv_current_prev=rv_current_prev,
+                        full_day_price_history=full_day_price_history,
+                        rv_ratio_prev=rv_ratio_prev,
+                        prev_volatility_metrics=prev_volatility_data,
                         rv_ratio_contraction_threshold=settings.get("vol_rv_ratio_contraction_threshold", 0.8),
                         rv_ratio_expansion_threshold=settings.get("vol_rv_ratio_expansion_threshold", 1.5),
                         min_rv_ratio_acceleration=settings.get("vol_min_rv_ratio_acceleration", 0.05),

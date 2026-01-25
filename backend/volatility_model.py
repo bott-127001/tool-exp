@@ -5,6 +5,7 @@ and determines market states: CONTRACTION, TRANSITION, EXPANSION
 """
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta, timezone
+import statistics
 
 
 def calculate_rv_current(price_series_15min: Optional[List[float]]) -> Optional[float]:
@@ -46,6 +47,51 @@ def calculate_rv_open_normalized(current_price: float, open_price: float,
     
     return rv_open_norm
 
+
+def calculate_rv_median(
+    full_day_price_history: List[Dict],
+    current_time: datetime
+) -> Optional[float]:
+    """
+    Calculate RV_median as the median of the last 4 completed 15-min windows.
+    
+    Why RV_median?
+    It provides a robust, short-term smoothing baseline aligned with 45-min holding trades,
+    filtering out transient spikes while adapting faster than a full-day average.
+    
+    Windows considered (rolling back from current time):
+    1. [t-15m, t] (Current developing window)
+    2. [t-30m, t-15m]
+    3. [t-45m, t-30m]
+    4. [t-60m, t-45m]
+    """
+    if not full_day_price_history:
+        return None
+        
+    rv_values = []
+    
+    # Ensure current_time is timezone aware if history is (to avoid comparison errors)
+    if full_day_price_history and full_day_price_history[0]["timestamp"].tzinfo is not None and current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+
+    for i in range(4):
+        end_time = current_time - timedelta(minutes=15 * i)
+        start_time = current_time - timedelta(minutes=15 * (i + 1))
+        
+        # Collect prices in this window
+        window_prices = [
+            p["price"] for p in full_day_price_history 
+            if start_time <= p["timestamp"] <= end_time
+        ]
+        
+        if len(window_prices) >= 2:
+            # Displacement: abs(Last - First)
+            rv_values.append(abs(window_prices[-1] - window_prices[0]))
+            
+    if not rv_values:
+        return None
+        
+    return statistics.median(rv_values)
 
 def _get_atm_cluster_options(options: List[Dict], atm_strike: float) -> List[Dict]:
     """
@@ -153,6 +199,7 @@ def determine_market_state(
     iv_vwap: Optional[float],
     market_open_time: Optional[datetime] = None,
     current_time: Optional[datetime] = None,
+    prev_state: str = "UNKNOWN",
     transition_minutes_guardrail: int = 30,
     rv_ratio_contraction_threshold: float = 0.8,
     rv_ratio_expansion_threshold: float = 1.5,
@@ -160,6 +207,14 @@ def determine_market_state(
 ) -> Tuple[str, Dict]:
     """
     Determine market state: CONTRACTION, TRANSITION, or EXPANSION
+    
+    State Stabilization Logic:
+    1. IV Grey Zone: ±10% around IV_VWAP.
+       - Expansion requires IV > IV_VWAP * 1.10
+       - Non-Expansion (Transition/Contraction) requires IV < IV_VWAP * 0.90
+    2. RV Ratio Grey Buffer: +0.2.
+       - Transition requires RV_ratio > threshold + 0.2
+       - Expansion requires RV_ratio > threshold + 0.2
     
     Guardrail: TRANSITION state is not allowed before X minutes from market open
     (default: 30 minutes)
@@ -183,32 +238,40 @@ def determine_market_state(
         minutes_since_open = time_since_open.total_seconds() / 60
         within_guardrail = minutes_since_open < transition_minutes_guardrail
     
-    # CONTRACTION (NO TRADE)
-    # RV_ratio < threshold AND IV_cluster <= IV_VWAP
-    if rv_ratio < rv_ratio_contraction_threshold and iv_atm <= iv_vwap:
+    # Define buffered thresholds for state changes
+    iv_expansion_trigger = iv_vwap * 1.10
+    iv_non_expansion_trigger = iv_vwap * 0.90
+    
+    rv_transition_trigger = rv_ratio_contraction_threshold + 0.2
+    rv_expansion_trigger = rv_ratio_expansion_threshold + 0.2
+
+    # 1. CONTRACTION (NO TRADE)
+    # RV_ratio < threshold AND IV < 0.90 * VWAP (Strict low vol)
+    if rv_ratio < rv_ratio_contraction_threshold and iv_atm < iv_non_expansion_trigger:
         return ("CONTRACTION", {
-            "reason": f"RV_ratio < {rv_ratio_contraction_threshold} (Low Volatility) and IV not repriced",
+            "reason": f"RV_ratio < {rv_ratio_contraction_threshold} and IV < 90% VWAP (Low Volatility)",
             "action": "NO TRADE - No naked buying",
+            "stabilization": "Strict condition met",
             "rv_ratio": rv_ratio,
             "iv_atm": iv_atm,
             "iv_vwap": iv_vwap
         })
-    
-    # TRANSITION (ONLY VALID ENTRY ZONE)
-    # threshold_low <= RV_ratio <= threshold_high
-    # AND RV_ratio is increasing compared to previous interval
-    # AND IV_cluster <= IV_VWAP
+
+    # 2. TRANSITION (ONLY VALID ENTRY ZONE)
+    # RV_ratio > (threshold + 0.2) AND Accelerating AND IV < 0.90 * VWAP
     is_accelerating = False
     if rv_ratio_delta is not None:
         is_accelerating = rv_ratio_delta >= min_rv_ratio_acceleration
 
-    
-    if rv_ratio_contraction_threshold <= rv_ratio <= rv_ratio_expansion_threshold and is_accelerating and iv_atm <= iv_vwap:
+    # Note: We removed the upper bound check (<= expansion_threshold) here because
+    # if RV is very high but IV is still LOW, it is a valid Transition (buying opportunity).
+    if rv_ratio > rv_transition_trigger and is_accelerating and iv_atm < iv_non_expansion_trigger:
         if within_guardrail:
             # Guardrail: Force CONTRACTION if within guardrail period
             return ("CONTRACTION", {
                 "reason": f"TRANSITION blocked by guardrail - less than {transition_minutes_guardrail} minutes from open",
                 "action": "NO TRADE - Wait for guardrail period to pass",
+                "stabilization": "Guardrail active",
                 "rv_ratio": rv_ratio,
                 "iv_atm": iv_atm,
                 "iv_vwap": iv_vwap,
@@ -217,8 +280,9 @@ def determine_market_state(
             })
         else:
             return ("TRANSITION", {
-                "reason": f"RV_ratio in transition zone ({rv_ratio_contraction_threshold}-{rv_ratio_expansion_threshold}) and accelerating (delta >= {min_rv_ratio_acceleration}), IV stable",
+                "reason": f"RV_ratio > {rv_transition_trigger:.2f} (Buffered), Accelerating, IV < 90% VWAP",
                 "action": "VALID ENTRY ZONE - Buy options here",
+                "stabilization": "Strict condition met",
                 "rv_ratio": rv_ratio,
                 "rv_ratio_delta": rv_ratio_delta,
                 "iv_atm": iv_atm,
@@ -226,17 +290,31 @@ def determine_market_state(
                 "is_accelerating": True
             })
     
-    # EXPANSION (DO NOT ENTER FRESH)
-    # RV_ratio > threshold AND IV_cluster > IV_VWAP
-    if rv_ratio > rv_ratio_expansion_threshold and iv_atm > iv_vwap:
+    # 3. EXPANSION (DO NOT ENTER FRESH)
+    # RV_ratio > (threshold + 0.2) AND IV > 1.10 * VWAP
+    if rv_ratio > rv_expansion_trigger and iv_atm > iv_expansion_trigger:
         return ("EXPANSION", {
-            "reason": f"RV_ratio > {rv_ratio_expansion_threshold} (High Volatility) and IV repriced",
+            "reason": f"RV_ratio > {rv_expansion_trigger:.2f} (Buffered) and IV > 110% VWAP (Repriced)",
             "action": "DO NOT ENTER FRESH - Manage existing trades only",
+            "stabilization": "Strict condition met",
             "rv_ratio": rv_ratio,
             "iv_atm": iv_atm,
             "iv_vwap": iv_vwap
         })
     
+    # 4. GREY ZONE / FALLBACK
+    # If we are here, current metrics do not strictly satisfy any new state condition.
+    # Retain the previous state if it was valid.
+    if prev_state in ["CONTRACTION", "TRANSITION", "EXPANSION"]:
+        return (prev_state, {
+            "reason": f"Grey Zone - Retaining previous state ({prev_state})",
+            "action": "HOLD STATE - Metrics in buffer zone",
+            "stabilization": "Grey Zone Active",
+            "rv_ratio": rv_ratio,
+            "iv_atm": iv_atm,
+            "iv_vwap": iv_vwap
+        })
+
     # Default fallback
     return ("UNKNOWN", {
         "reason": "Default state - conditions not met for Transition or Expansion",
@@ -257,7 +335,9 @@ def calculate_volatility_metrics(
     options: List[Dict],
     atm_strike: float,
     underlying_price: float,
-    rv_current_prev: Optional[float] = None,
+    full_day_price_history: List[Dict],
+    rv_ratio_prev: Optional[float] = None,
+    prev_volatility_metrics: Optional[Dict] = None,
     rv_ratio_contraction_threshold: float = 0.8,
     rv_ratio_expansion_threshold: float = 1.5,
     min_rv_ratio_acceleration: float = 0.05,
@@ -270,36 +350,95 @@ def calculate_volatility_metrics(
     # Calculate metrics
     rv_current = calculate_rv_current(price_series_15min)
     rv_open_norm = calculate_rv_open_normalized(current_price, open_price, market_open_time, current_time)
+    rv_median = calculate_rv_median(full_day_price_history, current_time)
     
     rv_ratio = None
     rv_ratio_delta = None
-    if rv_current is not None and rv_open_norm is not None and rv_open_norm > 0:
-        rv_ratio = rv_current / rv_open_norm
-        if rv_current_prev is not None and rv_current_prev > 0:
-            rv_ratio_delta = (rv_current / rv_current_prev) - 1
+    
+    # Use RV_median as the denominator for short-term smoothing.
+    # Fallback to RV_open_norm if median is unavailable or zero.
+    denominator = rv_median if (rv_median is not None and rv_median > 0) else rv_open_norm
+
+    if rv_current is not None and denominator is not None and denominator > 0:
+        rv_ratio = rv_current / denominator
+        if rv_ratio_prev is not None and rv_ratio_prev > 0:
+            rv_ratio_delta = (rv_ratio / rv_ratio_prev) - 1
         
     iv_atm = get_iv_cluster(options, atm_strike)
     iv_vwap = calculate_iv_vwap(options, atm_strike)
     
-    # Determine market state
-    state_name, state_info = determine_market_state(
+    # Extract previous state info for stabilization
+    prev_confirmed_state = "UNKNOWN"
+    prev_pending_state = None
+    prev_pending_start = None
+    
+    if prev_volatility_metrics:
+        prev_confirmed_state = prev_volatility_metrics.get("market_state", "UNKNOWN")
+        prev_pending_state = prev_volatility_metrics.get("pending_state")
+        start_str = prev_volatility_metrics.get("pending_state_start_time")
+        if start_str:
+            try:
+                prev_pending_start = datetime.fromisoformat(start_str)
+            except (ValueError, TypeError):
+                pass
+
+    # Determine "Candidate" market state using Grey Zone logic
+    candidate_state, candidate_info = determine_market_state(
         rv_ratio, rv_ratio_delta, iv_atm, iv_vwap, 
         market_open_time=market_open_time,
         current_time=current_time,
+        prev_state=prev_confirmed_state,
         rv_ratio_contraction_threshold=rv_ratio_contraction_threshold,
         rv_ratio_expansion_threshold=rv_ratio_expansion_threshold,
         min_rv_ratio_acceleration=min_rv_ratio_acceleration
     )
     
+    # Apply Debounce / Hold Rule (1-minute hold)
+    final_state = prev_confirmed_state
+    final_state_info = candidate_info
+    
+    pending_state = prev_pending_state
+    pending_state_start_time = prev_pending_start
+    
+    if candidate_state == prev_confirmed_state:
+        # Condition holds or is in grey zone retaining state -> Reset pending
+        pending_state = None
+        pending_state_start_time = None
+        final_state = candidate_state
+    else:
+        # Candidate differs from confirmed
+        if candidate_state == pending_state:
+            # We are already pending this state, check duration
+            if pending_state_start_time:
+                duration = (current_time - pending_state_start_time).total_seconds()
+                if duration >= 60:
+                    # Confirmed!
+                    final_state = candidate_state
+                    pending_state = None
+                    pending_state_start_time = None
+                else:
+                    # Keep waiting, retain old state
+                    final_state = prev_confirmed_state
+                    final_state_info["stabilization_status"] = f"Pending switch to {candidate_state} ({int(duration)}s/60s)"
+        else:
+            # New pending state detected
+            pending_state = candidate_state
+            pending_state_start_time = current_time
+            final_state = prev_confirmed_state
+            final_state_info["stabilization_status"] = f"New pending state: {candidate_state}"
+
     return {
         "rv_current": rv_current,
         "rv_open_norm": rv_open_norm,
+        "rv_median": rv_median,
         "rv_ratio": rv_ratio,
         "rv_ratio_delta": rv_ratio_delta,
         "iv_atm": iv_atm,
         "iv_vwap": iv_vwap,
-        "market_state": state_name,
-        "state_info": state_info,
+        "market_state": final_state,
+        "state_info": final_state_info,
+        "pending_state": pending_state,
+        "pending_state_start_time": pending_state_start_time.isoformat() if pending_state_start_time else None,
         "current_price": current_price,
         "open_price": open_price,
         "price_15min_ago": price_15min_ago,
