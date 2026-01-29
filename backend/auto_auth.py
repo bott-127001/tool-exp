@@ -471,7 +471,7 @@ async def daily_token_refresh_scheduler():
             # Refresh tokens for samarth only (can feed both samarth and prajwal)
             print(f"\n🔄 Starting daily token refresh at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
             from database import mark_login_failure, get_user_tokens
-            from data_fetcher import enable_polling
+            from pipeline_worker import enable_polling
             
             # Only login for samarth - this account can feed both samarth and prajwal
             user = "samarth"

@@ -319,7 +319,7 @@ async def callback( # This function is already async, which is great
                 raise Exception("Token storage verification failed")
             
             # Enable polling after successful login
-            from data_fetcher import enable_polling
+            from pipeline_worker import enable_polling
             enable_polling()
             
             # Redirect to frontend dashboard with status code 302
@@ -367,10 +367,10 @@ async def check_auth(user: str):
 @auth_router.post("/logout")
 async def logout():
     """Logout a user by clearing their tokens and stopping polling"""
-    from data_fetcher import disable_polling, get_current_authenticated_user
+    from pipeline_worker import disable_polling, get_current_user
     
     # Find the currently authenticated user
-    current_user = await get_current_authenticated_user()
+    current_user = get_current_user()
     
     if current_user:
         await clear_user_tokens(current_user)
@@ -656,7 +656,7 @@ async def trigger_upstox_login(request: Request):
         
         # Import and call automated login
         from auto_auth import get_selenium_executor, _run_selenium_login_sync
-        from data_fetcher import enable_polling
+        from pipeline_worker import enable_polling
         
         # Run Selenium in thread pool to prevent worker timeout in production
         loop = asyncio.get_event_loop()

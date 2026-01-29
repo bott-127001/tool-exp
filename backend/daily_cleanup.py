@@ -51,17 +51,16 @@ async def null_out_tokens():
 
 
 async def reset_in_memory_state():
-    """Reset in-memory state variables in data_fetcher module."""
+    """Reset in-memory state variables using the pipeline module."""
     try:
-        from data_fetcher import reset_baseline_greeks
-        import data_fetcher
+        from pipeline_worker import reset_baseline, pipeline
         
-        # Reset baseline greeks (this also clears price history)
-        reset_baseline_greeks()
+        # Reset baseline greeks using the pipeline's locked method
+        await reset_baseline()
         
-        # Clear latest data and raw option chain
-        data_fetcher.latest_data = None
-        data_fetcher.raw_option_chain = None
+        # Also reset the pipeline state
+        pipeline.state.latest_data = None
+        pipeline.state.raw_option_chain = None
         
         print("✅ Reset in-memory state (baseline_greeks, price_history, latest_data)")
     except Exception as e:

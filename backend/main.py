@@ -16,7 +16,11 @@ load_dotenv()
 from auth import auth_router, get_frontend_user_from_token_async
 from database import init_db, get_user_settings, update_user_settings
 from ws_manager import manager # Import the shared manager instance
-from data_fetcher import start_polling, stop_polling, get_latest_data, get_current_authenticated_user, clear_daily_baseline
+from pipeline_worker import (
+    start_polling, stop_polling, get_latest_data, 
+    get_current_user as get_current_authenticated_user,
+    reset_baseline as clear_daily_baseline_async, pipeline
+)
 from greek_signals import detect_signals
 
 # For data export
@@ -166,7 +170,7 @@ async def get_current_user():
     """
     Returns the currently authenticated user, if any.
     """
-    user = await get_current_authenticated_user()
+    user = get_current_authenticated_user()
     return JSONResponse(content={"user": user})
 
 
@@ -176,11 +180,13 @@ async def reset_baseline():
     Manually clears the baseline greeks for the current user and the current day
     from the database, forcing a recapture on the next poll.
     """
-    user = await get_current_authenticated_user()
+    user = get_current_authenticated_user()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    await clear_daily_baseline(user, today_str) # Add await here
+    from data_fetcher import clear_daily_baseline
+    await clear_daily_baseline(user, today_str)
+    await clear_daily_baseline_async()
     return {"message": "Baseline greeks for today have been cleared. A new baseline will be captured on the next data poll."}
 
 
@@ -302,7 +308,7 @@ async def clear_market_data():
     
     NOTE: Does NOT null out tokens (use /api/clear-tokens endpoint for that).
     """
-    user = await get_current_authenticated_user()
+    user = get_current_authenticated_user()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -341,7 +347,7 @@ async def clear_tokens():
     NOTE: Tokens are also automatically cleared at 3 AM IST daily.
     This endpoint provides a manual trigger option.
     """
-    user = await get_current_authenticated_user()
+    user = get_current_authenticated_user()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
