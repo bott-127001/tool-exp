@@ -53,16 +53,19 @@ async def null_out_tokens():
 async def reset_in_memory_state():
     """Reset in-memory state variables using the pipeline module."""
     try:
-        from pipeline_worker import reset_baseline, pipeline
+        from pipeline_worker import pipeline
         
-        # Reset baseline greeks using the pipeline's locked method
-        await reset_baseline()
-        
-        # Also reset the pipeline state
-        pipeline.state.latest_data = None
-        pipeline.state.raw_option_chain = None
-        
-        print("✅ Reset in-memory state (baseline_greeks, price_history, latest_data)")
+        # Acquire lock to safely reset state
+        lock_acquired = await pipeline.acquire_lock(timeout=10.0)
+        if lock_acquired:
+            try:
+                # Use the comprehensive reset_for_new_day method
+                pipeline.state.reset_for_new_day()
+                print("✅ Reset in-memory state (baseline_greeks, price_history, latest_data, signal_state)")
+            finally:
+                pipeline.release_lock()
+        else:
+            print("⚠️  Could not acquire pipeline lock for state reset")
     except Exception as e:
         print(f"⚠️  Error resetting in-memory state: {str(e)}")
         # Don't fail the whole cleanup if this fails

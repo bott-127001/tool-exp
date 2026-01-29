@@ -144,7 +144,7 @@ async def baseline_stage(username: str, aggregated: Dict) -> tuple:
         await save_daily_baseline(username, today_str, state.baseline_greeks)
     
     change_from_baseline = calculate_change_from_baseline(
-        aggregated, state.baseline_greeks
+        aggregated, state.baseline_greeks if state.baseline_greeks else {}
     )
     
     return state.baseline_greeks, change_from_baseline
@@ -498,6 +498,9 @@ async def polling_worker():
             continue
         
         try:
+            if not state.current_user:
+                print("⚠️ No authenticated user, skipping cycle")
+                continue
             success = await run_pipeline_cycle(state.current_user)
             if not success:
                 if state.last_successful_poll:

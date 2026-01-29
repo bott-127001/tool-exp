@@ -80,6 +80,11 @@ class PipelineState:
         self.data_sequence = 0
         self.last_successful_poll = None
         self.stall_warning_sent = False
+        self.signal_confirmation_state = {}
+        self.prev_day_stats_fetched_for = {}
+        self.current_day_open_candle_fetched_for = {}
+        self.latest_data = None
+        self.raw_option_chain = None
 
     def reset_for_logout(self):
         """Reset state when user logs out"""
