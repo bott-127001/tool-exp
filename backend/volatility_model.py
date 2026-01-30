@@ -200,9 +200,9 @@ def determine_market_state(
     market_open_time: Optional[datetime] = None,
     current_time: Optional[datetime] = None,
     prev_state: str = "UNKNOWN",
-    transition_minutes_guardrail: int = 30,
-    rv_ratio_contraction_threshold: float = 0.8,
-    rv_ratio_expansion_threshold: float = 1.5,
+    transition_minutes_guardrail: int = 15,
+    rv_ratio_contraction_threshold: float = 0.7,
+    rv_ratio_expansion_threshold: float = 1.3,
     min_rv_ratio_acceleration: float = 0.05,
 ) -> Tuple[str, Dict]:
     """

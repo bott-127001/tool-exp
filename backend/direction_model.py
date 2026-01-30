@@ -427,12 +427,12 @@ def calculate_direction_metrics(
 
     # Defaults for thresholds and optional previous-day inputs
     settings = settings or {}
-    gap_acceptance_threshold = settings.get("dir_gap_acceptance_threshold", 0.65)
+    gap_acceptance_threshold = settings.get("dir_gap_acceptance_threshold", 0.55)
     acceptance_neutral_threshold = settings.get("dir_acceptance_neutral_threshold", 0.5)
-    rea_bull_threshold = settings.get("dir_rea_bull_threshold", 0.3)
-    rea_bear_threshold = settings.get("dir_rea_bear_threshold", -0.3)
+    rea_bull_threshold = settings.get("dir_rea_bull_threshold", 0.20)
+    rea_bear_threshold = settings.get("dir_rea_bear_threshold", -0.20)
     rea_neutral_abs_threshold = settings.get("dir_rea_neutral_abs_threshold", 0.3)
-    de_directional_threshold = settings.get("dir_de_directional_threshold", 0.5)
+    de_directional_threshold = settings.get("dir_de_directional_threshold", 0.35)
     de_neutral_threshold = settings.get("dir_de_neutral_threshold", 0.3)
 
     # Optional previous-day inputs (can be provided from Direction & Asymmetry UI)
