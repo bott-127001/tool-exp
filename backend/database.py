@@ -72,16 +72,16 @@ async def init_db():
             "theta_threshold": 0.02,
             "gamma_threshold": 0.01,
             "consecutive_confirmations": 2,
-            "vol_rv_ratio_contraction_threshold": 0.8,
-            "vol_rv_ratio_expansion_threshold": 1.5,
+            "vol_rv_ratio_contraction_threshold": 0.7,
+            "vol_rv_ratio_expansion_threshold": 1.3,
             "vol_min_rv_ratio_acceleration": 0.05,
             # Direction & Asymmetry thresholds
-            "dir_gap_acceptance_threshold": 0.65,
+            "dir_gap_acceptance_threshold": 0.55,
             "dir_acceptance_neutral_threshold": 0.5,
-            "dir_rea_bull_threshold": 0.3,
-            "dir_rea_bear_threshold": -0.3,
-            "dir_rea_neutral_abs_threshold": 0.3,
-            "dir_de_directional_threshold": 0.5,
+            "dir_rea_bull_threshold": 0.20,
+            "dir_rea_bear_threshold": -0.20,
+            "dir_rea_neutral_abs_threshold": 0.20,
+            "dir_de_directional_threshold": 0.35,
             "dir_de_neutral_threshold": 0.3,
         }
         await settings_collection.update_one(
