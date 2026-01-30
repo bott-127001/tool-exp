@@ -46,7 +46,23 @@ For production, the build process:
 2. Copies static files to backend/static
 3. Runs with gunicorn + uvicorn worker
 
+## Data Logger
+The system includes an automated data logger (`backend/data_logger.py`) that:
+- Logs all calculated metrics to CSV every 5 seconds during market hours (9:15 AM - 3:30 PM IST)
+- Creates daily CSV files in `logs/` directory with format `nifty_signals_YYYY-MM-DD.csv`
+- Runs automatically as a background task when the server starts
+- Does not interfere with the main application
+
+**Logged fields include:**
+- Volatility: RV Ratio, RV Ratio Delta, RV (current), RV (open-normalized), IV (ATM), IV-VWAP, State
+- Direction: Gap, Gap %, Acceptance Ratio, Opening Bias, IB High/Low/Range, RE Up/Down, REA, DE Value, State
+- Other: Spot price, Day open price, Previous day data, Timestamp
+
 ## Recent Changes
+- 2026-01-30: Added data logger for CSV metrics logging during market hours
+- 2026-01-30: Adjusted threshold values for market state and direction calculations
+  - Volatility thresholds: rv_ratio_contraction=0.7, rv_ratio_expansion=1.3, transition_guardrail=15min
+  - Direction thresholds: gap_acceptance=0.55, rea_bull/bear=±0.20, de_directional=0.35
 - 2026-01-29: Configured for Replit environment
   - Updated Vite config for port 5000 and allowed hosts
   - Created run_dev.sh for development workflow

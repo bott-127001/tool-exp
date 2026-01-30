@@ -79,25 +79,43 @@ async def lifespan(app: FastAPI):
         # Note: Full daily cleanup is now manual-only via Settings page
         from daily_cleanup import token_cleanup_scheduler
         token_cleanup_task = asyncio.create_task(token_cleanup_scheduler())
+        
+        # Start data logger (logs all metrics to CSV every 5 seconds during market hours)
+        from data_logger import run_logger
+        data_logger_task = asyncio.create_task(run_logger())
     else:
         # This is a duplicate worker, just initialize DB
         print("Database initialized (worker process)")
         polling_task = None
         token_refresh_task = None
         token_cleanup_task = None
+        data_logger_task = None
     
     yield
     
     # Shutdown
-    if polling_task is not None and token_refresh_task is not None and token_cleanup_task is not None:
+    tasks_to_cancel = []
+    
+    if polling_task is not None:
         await stop_polling()
         polling_task.cancel()
+        tasks_to_cancel.append(polling_task)
+    
+    if token_refresh_task is not None:
         token_refresh_task.cancel()
+        tasks_to_cancel.append(token_refresh_task)
+    
+    if token_cleanup_task is not None:
         token_cleanup_task.cancel()
+        tasks_to_cancel.append(token_cleanup_task)
+    
+    if data_logger_task is not None:
+        data_logger_task.cancel()
+        tasks_to_cancel.append(data_logger_task)
+    
+    for task in tasks_to_cancel:
         try:
-            await polling_task
-            await token_refresh_task
-            await token_cleanup_task
+            await task
         except asyncio.CancelledError:
             pass
 
