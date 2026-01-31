@@ -118,29 +118,20 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown
-    tasks_to_cancel = []
-    
-    if polling_task is not None:
+    # Shutdown - revert to original logic
+    if polling_task is not None and token_refresh_task is not None and token_cleanup_task is not None:
         await stop_polling()
         polling_task.cancel()
-        tasks_to_cancel.append(polling_task)
-    
-    if token_refresh_task is not None:
         token_refresh_task.cancel()
-        tasks_to_cancel.append(token_refresh_task)
-    
-    if token_cleanup_task is not None:
         token_cleanup_task.cancel()
-        tasks_to_cancel.append(token_cleanup_task)
-    
-    if data_logger_task is not None:
-        data_logger_task.cancel()
-        tasks_to_cancel.append(data_logger_task)
-    
-    for task in tasks_to_cancel:
+        if data_logger_task is not None:
+            data_logger_task.cancel()
         try:
-            await task
+            await polling_task
+            await token_refresh_task
+            await token_cleanup_task
+            if data_logger_task is not None:
+                await data_logger_task
         except asyncio.CancelledError:
             pass
 
