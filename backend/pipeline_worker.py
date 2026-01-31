@@ -469,9 +469,9 @@ async def polling_worker():
             await asyncio.sleep(5)
             continue
         
-        # Note: We removed the should_poll check here because it's in-memory only
-        # and doesn't work across gunicorn workers. Finding a valid authenticated
-        # user with today's tokens (from DB) is sufficient to start polling.
+        if not state.should_poll:
+            await asyncio.sleep(2)
+            continue
         
         if found_user != state.current_user:
             state.current_user = found_user
