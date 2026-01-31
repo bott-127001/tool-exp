@@ -38,11 +38,32 @@ def _is_main_worker():
     
     try:
         import fcntl
+        
+        # Clean up stale lock file on new deployment (check if PID in file is still running)
+        if os.path.exists(lock_file):
+            try:
+                with open(lock_file, 'r') as f:
+                    old_pid = int(f.read().strip())
+                # Check if old process is still running
+                try:
+                    os.kill(old_pid, 0)  # Signal 0 just checks if process exists
+                except OSError:
+                    # Process doesn't exist, remove stale lock
+                    os.remove(lock_file)
+            except (ValueError, IOError, OSError):
+                # Can't read PID or file issue, try to remove
+                try:
+                    os.remove(lock_file)
+                except OSError:
+                    pass
+        
         # Try to acquire an exclusive lock (non-blocking)
         lock_fd = os.open(lock_file, os.O_CREAT | os.O_WRONLY)
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            # We got the lock, this is the main worker
+            # We got the lock, write our PID and mark as main worker
+            os.write(lock_fd, str(os.getpid()).encode())
+            os.fsync(lock_fd)
             return True
         except (IOError, OSError):
             # Lock is held by another process
@@ -81,8 +102,12 @@ async def lifespan(app: FastAPI):
         token_cleanup_task = asyncio.create_task(token_cleanup_scheduler())
         
         # Start data logger (logs all metrics to CSV every 5 seconds during market hours)
-        from data_logger import run_logger
-        data_logger_task = asyncio.create_task(run_logger())
+        try:
+            from data_logger import run_logger
+            data_logger_task = asyncio.create_task(run_logger())
+        except Exception as e:
+            print(f"⚠️ Data logger failed to start: {e}")
+            data_logger_task = None
     else:
         # This is a duplicate worker, just initialize DB
         print("Database initialized (worker process)")
